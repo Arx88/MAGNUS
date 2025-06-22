@@ -55,6 +55,12 @@ class SystemInstaller:
     def __init__(self):
         self.system = platform.system().lower()
         self.arch = platform.machine().lower()
+
+        # Initial Python check before anything else
+        if not self._check_python_installation():
+            self.print_step("Critical Python setup issue detected. Please see the messages above.", "error")
+            sys.exit(1)
+
         self.is_admin = self._check_admin()
         self.install_dir = Path.home() / "manus-system"
         self.config = {}
@@ -77,7 +83,42 @@ class SystemInstaller:
                 "darwin": "https://nodejs.org/dist/v20.10.0/node-v20.10.0.pkg"
             }
         }
-    
+
+    def _check_python_installation(self) -> bool:
+        """Checks if Python is correctly installed and accessible."""
+        try:
+            # Check if Python executable is found and is not the Windows Store stub
+            python_exe = sys.executable
+            if not python_exe or "py.exe" in python_exe.lower() or "python.exe" not in python_exe.lower():
+                 # This condition might indicate the Windows Store stub or an unusual setup
+                pass # Further checks will be done
+
+            # Try running a simple command
+            process = subprocess.run([python_exe, "--version"], capture_output=True, text=True, check=False)
+
+            if process.returncode != 0 or "Python was not found" in process.stdout or "Python was not found" in process.stderr:
+                self.print_step("Python execution failed or Windows Store version detected.", "error")
+                self.print_step("Please ensure you have a standard Python installation (e.g., from python.org).", "warning")
+                self.print_step("Follow these steps:", "info")
+                self.print_step("1. Install Python: Download from https://www.python.org/downloads/", "info")
+                self.print_step("2. Add to PATH: Ensure Python and Scripts directories are in your PATH environment variable.", "info")
+                self.print_step("   Example: C:\\PythonXX and C:\\PythonXX\\Scripts", "info")
+                self.print_step("3. Disable App Execution Alias (Windows):", "info")
+                self.print_step("   - Go to 'Settings' > 'Apps' > 'Advanced app settings' (or 'Apps & features' > 'App execution aliases').", "info")
+                self.print_step("   - Turn OFF 'App Installer' for 'python.exe' and 'python3.exe'.", "info")
+                self.print_step("   - If you see 'python.exe' or 'python3.exe' pointing to the Microsoft Store, disable them.", "info")
+                self.print_step("After fixing, please re-run this script.", "info")
+                return False
+
+            self.print_step(f"Python version check successful: {process.stdout.strip()}", "success")
+            return True
+
+        except Exception as e:
+            self.print_step(f"Error during Python check: {e}", "error")
+            self.print_step("This script requires a working Python 3.8+ installation.", "warning")
+            self.print_step("Please ensure Python is correctly installed and added to your system PATH.", "info")
+            return False
+
     def _check_admin(self) -> bool:
         """Verifica si se ejecuta con permisos de administrador"""
         try:
@@ -93,11 +134,45 @@ class SystemInstaller:
         """Ejecuta el script con permisos de administrador"""
         if self.system == "windows":
             import ctypes
-            ctypes.windll.shell32.ShellExecuteW(
+            hinstance = ctypes.windll.shell32.ShellExecuteW(
                 None, "runas", sys.executable, " ".join(sys.argv), None, 1
             )
+            if hinstance <= 32:
+                # Error codes are described at https://docs.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecutew
+                error_code = hinstance
+                error_message = f"Falló el intento de elevar privilegios (ShellExecuteW código de error: {error_code}).\n"
+                if error_code == 0: # ERROR_BAD_FORMAT
+                    error_message += "El archivo .exe no es válido (ERROR_BAD_FORMAT)."
+                elif error_code == 2: # ERROR_FILE_NOT_FOUND
+                    error_message += "El archivo especificado no fue encontrado (ERROR_FILE_NOT_FOUND)."
+                elif error_code == 3: # ERROR_PATH_NOT_FOUND
+                    error_message += "La ruta especificada no fue encontrada (ERROR_PATH_NOT_FOUND)."
+                elif error_code == 5: # ERROR_ACCESS_DENIED
+                    error_message += "Acceso denegado (ERROR_ACCESS_DENIED). ¿Canceló el diálogo UAC?"
+                elif error_code == 8: # ERROR_NOT_ENOUGH_MEMORY
+                    error_message += "No hay suficiente memoria para completar la operación."
+                elif error_code == 31: # SE_ERR_NOASSOC
+                    error_message += "No hay una aplicación asociada con la extensión de archivo especificada."
+                else:
+                    try:
+                        # Attempt to get a Windows system error message
+                        win_error = ctypes.WinError(error_code)
+                        error_message += f"Error del sistema: {win_error.strerror} (Código: {win_error.winerror})"
+                    except Exception: # Fallback if WinError fails for some reason
+                        error_message += "Error desconocido al intentar obtener detalles del error de Windows."
+
+                self.print_step(error_message, "error")
+                self.print_step("La instalación no puede continuar sin permisos de administrador.", "error")
+                sys.exit(1) # Exit the non-elevated script immediately if elevation failed to launch
         else:
-            os.execvp("sudo", ["sudo", sys.executable] + sys.argv)
+            # For Linux/macOS, if execvp fails, it will raise an OSError.
+            # If it succeeds, it replaces the current process, so code here won't run.
+            try:
+                os.execvp("sudo", ["sudo", sys.executable] + sys.argv)
+            except OSError as e:
+                self.print_step(f"Falló el intento de elevar privilegios con sudo: {e}", "error")
+                self.print_step("La instalación no puede continuar sin permisos de administrador.", "error")
+                sys.exit(1)
     
     def print_step(self, message: str, step_type: str = "info"):
         """Imprime un paso con formato"""
@@ -988,24 +1063,59 @@ StartupNotify=true
 
 def main():
     """Función principal"""
-    installer = SystemInstaller()
+    installer = SystemInstaller() # Python check happens in __init__
     
+    # Early log for elevated process
+    if installer.is_admin:
+        log_file_path = Path(tempfile.gettempdir()) / "manus_setup_elevated.log"
+        try:
+            with open(log_file_path, "a", encoding="utf-8") as log_file:
+                log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Elevated script instance started. Python: {sys.executable}\n")
+        except Exception as e:
+            installer.print_step(f"Warning: Could not write to elevated log file {log_file_path}: {e}", "warning")
+
     try:
-        if installer.run_installation():
+        # Check for admin rights and re-launch if necessary
+        if not installer.is_admin:
+            installer.print_step("Se requieren permisos de administrador.", "warning")
+            installer.print_step("Intentando re-lanzar con privilegios elevados...", "info")
+            installer._run_as_admin() # This will exit if ShellExecuteW fails, or replace process on Unix
+            # If _run_as_admin on Windows returns (because ShellExecuteW > 32), it means it *attempted* to start the new process.
+            # The current non-admin script should now inform the user and exit.
+            installer.print_step("Solicitud de elevación enviada. Por favor, observe la nueva ventana de la consola para ver el progreso.", "info")
+            installer.print_step("Esta ventana se cerrará en unos segundos...", "info")
+            time.sleep(5) # Give user time to read
+            sys.exit(0) # Gracefully exit the non-elevated script
+
+        # If we reach here, we are running with admin rights (either initially or after elevation)
+        if installer.is_admin and 'log_file_path' in locals(): # Log before running installation
+             with open(log_file_path, "a", encoding="utf-8") as log_file:
+                log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Admin rights confirmed. Calling run_installation().\n")
+
+        if installer.run_installation(): # This is the main execution path for the admin instance
             installer.show_completion_message()
+            if installer.is_admin and 'log_file_path' in locals():
+                with open(log_file_path, "a", encoding="utf-8") as log_file:
+                    log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Installation successful.\n")
             
-            # Preguntar si iniciar el sistema
             if input("\n¿Deseas iniciar el sistema ahora? (s/n): ").lower() in ['s', 'y', 'yes', 'sí']:
                 if installer.system == "windows":
                     os.system(f'"{installer.install_dir / "scripts" / "start.bat"}"')
                 else:
                     os.system(f'"{installer.install_dir / "scripts" / "start.sh"}"')
         else:
-            installer.print_step("La instalación falló", "error")
+            # This message is from the ELEVATED script if run_installation() returns False
+            installer.print_step("La instalación falló (proceso elevado).", "error")
+            if installer.is_admin and 'log_file_path' in locals():
+                with open(log_file_path, "a", encoding="utf-8") as log_file:
+                    log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] run_installation() returned False.\n")
             sys.exit(1)
             
     except KeyboardInterrupt:
-        installer.print_step("Instalación cancelada por el usuario", "warning")
+        installer.print_step("Instalación cancelada por el usuario.", "warning")
+        if 'log_file_path' in locals() and installer.is_admin:
+             with open(log_file_path, "a", encoding="utf-8") as log_file:
+                log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Installation cancelled by user.\n")
         sys.exit(1)
     except Exception as e:
         installer.print_step(f"Error inesperado: {e}", "error")
