@@ -995,13 +995,32 @@ StartupNotify=true
         self.print_step("=== INSTALADOR MANUS-LIKE SYSTEM ===", "header")
         self.print_step(f"Sistema detectado: {self.system} ({self.arch})", "info")
         self.print_step(f"Directorio de instalación: {self.install_dir}", "info")
+
+        log_file_path = None
+        if self.is_admin: # Ensure log_file_path is defined if admin
+            log_file_path = Path(tempfile.gettempdir()) / "manus_setup_elevated.log"
+
+        # Helper function for logging within this method
+        def _log_admin_action(message: str):
+            if self.is_admin and log_file_path:
+                try:
+                    with open(log_file_path, "a", encoding="utf-8") as log_f:
+                        log_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [run_installation] {message}\n")
+                except Exception as e:
+                    self.print_step(f"Warning: Could not write to elevated log file {log_file_path}: {e}", "warning")
         
-        # Verificar permisos de administrador
+        # Verificar permisos de administrador - This check is actually done in main() now before calling run_installation.
+        # If not self.is_admin, main() would have handled re-launching.
+        # So, by the time we are here, self.is_admin should be True if elevation was required.
+        # However, if the script was initially launched as admin, this is the first point is_admin is effectively used by run_installation.
         if not self.is_admin:
-            self.print_step("Se requieren permisos de administrador", "warning")
-            self.print_step("Solicitando permisos...", "info")
-            self._run_as_admin()
+            # This case should ideally not be hit if main() logic is correct.
+            # If it is, it means the script was called in a way that bypassed main's admin check for run_installation.
+            self.print_step("Error crítico: run_installation() llamada sin permisos de administrador.", "error")
+            _log_admin_action("CRITICAL: run_installation() called without admin rights.")
             return False
+
+        _log_admin_action("Admin permissions confirmed for installation steps.")
         
         steps = [
             ("Configurando estructura del proyecto", self.setup_project_structure),
@@ -1024,15 +1043,21 @@ StartupNotify=true
         
         for i, (description, step_function) in enumerate(steps, 1):
             self.print_step(f"[{i}/{total_steps}] {description}", "info")
+            _log_admin_action(f"Starting step [{i}/{total_steps}]: {description}")
+
+            step_success = step_function()
             
-            if not step_function():
+            if not step_success:
                 self.print_step(f"Error en el paso: {description}", "error")
+                _log_admin_action(f"FAILED step [{i}/{total_steps}]: {description}")
                 return False
             
+            _log_admin_action(f"COMPLETED step [{i}/{total_steps}]: {description}")
             # Mostrar progreso
             progress = (i / total_steps) * 100
             self.print_step(f"Progreso: {progress:.1f}%", "info")
         
+        _log_admin_action("All installation steps completed successfully.")
         return True
     
     def show_completion_message(self):
@@ -1116,10 +1141,20 @@ def main():
         if 'log_file_path' in locals() and installer.is_admin:
              with open(log_file_path, "a", encoding="utf-8") as log_file:
                 log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Installation cancelled by user.\n")
+        if installer.is_admin: # Keep console open on error
+            input("Presione Enter para salir...")
         sys.exit(1)
     except Exception as e:
         installer.print_step(f"Error inesperado: {e}", "error")
+        if 'log_file_path' in locals() and installer.is_admin: # Redundant check for log_file_path, but safe
+            with open(log_file_path, "a", encoding="utf-8") as log_file:
+                log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Unexpected error: {e}\n")
+        if installer.is_admin: # Keep console open on error
+            input("Presione Enter para salir...")
         sys.exit(1)
+
+    # For successful completion, the input() prompt for starting the system already keeps the window open.
+    # So, we only need the explicit input() pause in the error paths above for the admin instance.
 
 if __name__ == "__main__":
     main()
