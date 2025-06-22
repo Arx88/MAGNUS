@@ -205,6 +205,16 @@ class SystemInstaller:
                     text=True,
                     check=False
                 )
+                # Check for specific winget "already installed" exit code
+                # 2316632107 (0x8A15002B) observed for "already installed, no update"
+                # WINGET_EXIT_CODE_ALREADY_INSTALLED is 0x8A15000F (2316632079)
+                # We'll consider both for now, or more broadly any code that means "no action taken but not a failure for install intent"
+                # For now, specifically handling the observed code.
+                # Check if the original command string (if it was a string) contains " install "
+                original_command_str = command if isinstance(command, str) else " ".join(command)
+                if " install " in original_command_str.lower() and process.returncode == 2316632107:
+                    self.print_step(f"Winget: Paquete '{original_command_str.split(' install ')[-1].split(' ')[0]}' ya instalado y actualizado (código: {process.returncode}). Considerado como éxito.", "info")
+                    return 0, process.stdout.strip() # Treat as success
                 return process.returncode, process.stdout.strip()
             else: # Non-winget commands
                 if check: # If check=True, raise CalledProcessError on failure
