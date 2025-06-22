@@ -471,6 +471,9 @@ class SystemInstaller:
         pip_upgrade_exit_code, pip_upgrade_output = self.run_command(f"{sys.executable} -m pip install --upgrade pip")
         if pip_upgrade_exit_code != 0:
             self.print_step(f"Error actualizando pip (código: {pip_upgrade_exit_code}): {pip_upgrade_output}", "error")
+            if self.is_admin:
+                self.print_step("La ventana se cerrará en 20 segundos...", "info")
+                time.sleep(20)
             return False
         
         # Instalar dependencias del backend
@@ -494,6 +497,9 @@ class SystemInstaller:
             exit_code, output = self.run_command(f"{sys.executable} -m pip install {dep}")
             if exit_code != 0:
                 self.print_step(f"Error instalando {dep} (código: {exit_code}): {output}", "error")
+                if self.is_admin:
+                    self.print_step(f"La instalación de {dep} falló. La ventana se cerrará en 20 segundos...", "info")
+                    time.sleep(20)
                 return False
         
         self.print_step("Dependencias de Python instaladas", "success")
