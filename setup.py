@@ -498,16 +498,16 @@ class SystemInstaller:
         os.environ["PYO3_USE_ABI3_FORWARD_COMPATIBILITY"] = "1"
         self.print_step("Establecido PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 para la instalación de dependencias.", "info")
 
-        all_deps_installed = True
+        any_error_occurred = False
         for dep in backend_deps:
             exit_code, output = self.run_command(f"{sys.executable} -m pip install {dep}")
             if exit_code != 0:
                 self.print_step(f"Error instalando {dep} (código: {exit_code}): {output}", "error")
-                if self.is_admin:
-                    self.print_step(f"La instalación de {dep} falló. La ventana se cerrará en 20 segundos...", "info")
-                    time.sleep(20)
-                all_deps_installed = False
-                break # Stop on first error
+                # if self.is_admin: # Keep window open for debugging
+                #     self.print_step(f"La instalación de {dep} falló. La ventana se cerrará en 20 segundos...", "info")
+                #     time.sleep(20)
+                any_error_occurred = True
+                # Not breaking here to see all dependency errors, if any.
 
         # Restore original PYO3_USE_ABI3_FORWARD_COMPATIBILITY value
         if original_pyo3_env is None:
@@ -517,7 +517,9 @@ class SystemInstaller:
             os.environ["PYO3_USE_ABI3_FORWARD_COMPATIBILITY"] = original_pyo3_env
         self.print_step("Restaurado el valor original de PYO3_USE_ABI3_FORWARD_COMPATIBILITY.", "info")
 
-        if not all_deps_installed:
+        if any_error_occurred:
+            self.print_step("Uno o más errores ocurrieron durante la instalación de dependencias de Python.", "error")
+            input("Presiona Enter para salir...")
             return False
         
         self.print_step("Dependencias de Python instaladas", "success")
