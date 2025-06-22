@@ -200,28 +200,44 @@ class SystemInstaller:
                 # For winget, capture combined stdout/stderr and don't raise on error immediately
                 process = subprocess.run(
                     cmd_list,
-                    shell=shell, # shell=True might be needed if command is a string with args
-                    capture_output=True,
+                    shell=shell,
+                    stdout=subprocess.PIPE,    # Capture stdout
+                    stderr=subprocess.STDOUT,  # Redirect stderr to stdout stream
                     text=True,
-                    stderr=subprocess.STDOUT, # Redirect stderr to stdout
-                    check=False # We'll check returncode manually
+                    check=False                # We'll check returncode manually
                 )
                 # process.stdout will contain merged output
-                return process.returncode == 0, process.stdout
+                return process.returncode == 0, process.stdout.strip()
             else:
-                # Original behavior for non-winget commands
-                process = subprocess.run(
-                    cmd_list,
-                    shell=shell,
-                    capture_output=True,
-                    text=True,
-                    check=check # Let it raise CalledProcessError for non-winget if check is True
-                )
-                return True, process.stdout
+                # Behavior for non-winget commands
+                if check: # If check=True, we want CalledProcessError on failure
+                    process = subprocess.run(
+                        cmd_list,
+                        shell=shell,
+                        capture_output=True, # Uses PIPE for stdout and stderr
+                        text=True,
+                        check=True # Will raise CalledProcessError on non-zero return
+                    )
+                    return True, process.stdout.strip()
+                else: # If check=False, manually check return code and capture output
+                    process = subprocess.run(
+                        cmd_list,
+                        shell=shell,
+                        capture_output=True, # Uses PIPE for stdout and stderr
+                        text=True,
+                        check=False
+                    )
+                    if process.returncode == 0:
+                        return True, process.stdout.strip()
+                    else:
+                        # For non-winget, non-checking calls, return stderr if available, else stdout
+                        # This behavior might need refinement based on specific non-winget, non-checking call sites
+                        error_output = process.stderr.strip() if process.stderr else process.stdout.strip()
+                        return False, error_output
 
         except subprocess.CalledProcessError as e:
-            # This will now primarily be for non-winget commands if check=True
-            return False, e.stderr
+            # This will be hit by non-winget commands with check=True that fail
+            return False, e.stderr.strip() if e.stderr else str(e)
         except Exception as e:
             # General exceptions
             return False, str(e)
