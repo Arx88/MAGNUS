@@ -280,7 +280,28 @@ class SystemInstaller:
         self.print_step("Instalando Docker...")
         
         if self.system == "windows":
-            # Usar winget para instalar Docker Desktop
+            self.print_step("Verificando si Docker ya está instalado y operativo en Windows...")
+            # Try to run 'docker --version'. We use check=False because we expect it to fail if Docker isn't installed.
+            # The output of 'docker --version' isn't critical here, just its success.
+            docker_check_success, docker_version_output = self.run_command("docker --version", check=False)
+
+            if docker_check_success:
+                self.print_step(f"Docker ya está instalado y respondiendo: {docker_version_output.splitlines()[0] if docker_version_output else 'OK'}", "success")
+                # Also, ensure Docker service is actually running, not just CLI present
+                # A simple way is to try 'docker ps', which requires the daemon.
+                self.print_step("Verificando si el servicio Docker está en ejecución...")
+                docker_ps_success, docker_ps_output = self.run_command("docker ps", check=False)
+                if docker_ps_success:
+                    self.print_step("El servicio Docker está en ejecución.", "success")
+                    return True # Docker is installed and running
+                else:
+                    self.print_step("Docker CLI está presente, pero el servicio Docker no responde. Se intentará la instalación/reparación.", "warning")
+                    self.print_step(f"Salida de 'docker ps': {docker_ps_output}", "info")
+            else:
+                self.print_step("Docker no parece estar instalado o no está en PATH. Se procederá con la instalación.", "info")
+
+            # If Docker is not installed and responsive, proceed with winget installation.
+            self.print_step("Intentando instalar Docker Desktop usando winget...", "info")
             return self.install_winget_packages(["Docker.DockerDesktop"])
         
         elif self.system == "linux":
@@ -1089,9 +1110,9 @@ StartupNotify=true
         for i, (description, step_function) in enumerate(steps, 1):
             self.print_step(f"[{i}/{total_steps}] {description}", "info")
             _log_admin_action(f"Starting step [{i}/{total_steps}]: {description}")
-
-            step_success = step_function()
             
+            step_success = step_function()
+
             if not step_success:
                 self.print_step(f"Error en el paso: {description}", "error")
                 _log_admin_action(f"FAILED step [{i}/{total_steps}]: {description}")
