@@ -517,14 +517,19 @@ class SystemInstaller:
         rustup_install_successful = False
 
         if self.system == "windows":
+            self.print_step("Windows detectado: Se requieren MSVC Build Tools para Rust (MSVC target).")
+            if not self.install_msvc_build_tools():
+                self.print_step("Falló la instalación de MSVC Build Tools. La instalación de Rust (MSVC target) probablemente también fallará o tendrá problemas.", "warning")
+                # We can choose to return False here, or let Rust installation attempt proceed and fail.
+                # Let's proceed for now, as rustup might have its own checks or fallbacks, or user might fix MSVC manually.
+
+            # Proceed with Rust installation
             temp_dir = Path(tempfile.gettempdir())
             rustup_installer_path = temp_dir / "rustup-init.exe"
             rustup_url = "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe"
 
             if self.download_file(rustup_url, rustup_installer_path):
                 self.print_step("Ejecutando instalador de Rustup (rustup-init.exe)...")
-                # Using --no-modify-path because we'll add it to PATH for the current process manually.
-                # Profile default to ensure common components like rust-std are available.
                 install_cmd = [str(rustup_installer_path.resolve()), "-y", "--default-toolchain", "stable", "--profile", "default", "--no-modify-path"]
                 exit_code_install, output_install = self.run_command(install_cmd, shell=False, check=False)
 
@@ -534,7 +539,6 @@ class SystemInstaller:
                 else:
                     self.print_step(f"Falló la instalación de Rustup (código: {exit_code_install}). Salida: {output_install}", "error")
 
-                # Clean up installer
                 try:
                     os.unlink(rustup_installer_path)
                 except OSError as e:
@@ -578,6 +582,60 @@ class SystemInstaller:
 
         self.print_step("La instalación de Rust falló.", "error")
         return False
+
+    def install_msvc_build_tools(self) -> bool:
+        """Instala MSVC Build Tools usando winget en Windows."""
+        if self.system != "windows":
+            return True # Not applicable for non-Windows
+
+        self.print_step("Verificando/Instalando MSVC Build Tools (esto puede tardar mucho)...", "info")
+        # Command to install Visual Studio Build Tools with the C++ workload
+        # Using --force to ensure it runs even if winget thinks it might be there, to trigger repair/verify
+        # However, --force with winget can sometimes be problematic if not used carefully.
+        # Let's try without --force first.
+        # The ID for VS Build Tools is typically Microsoft.VisualStudio.BuildTools
+        # The workload for C++ is Microsoft.VisualStudio.Workload.VCTools
+        # Using --override to pass installer-specific arguments.
+        # --quiet should make the VS installer less interactive.
+        # --wait ensures winget waits for the (potentially very long) installation.
+        package_id = "Microsoft.VisualStudio.BuildTools"
+        installer_args = "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --quiet --wait"
+
+        # We need to ensure the installer_args are passed correctly through winget's --override
+        # Winget's --override needs a single string argument. Quotes within that string need care.
+        # Example: winget install vscode --override "/silent /mergetasks=!runcode"
+        # So, for VS, it might be: --override "--add Workload1 --quiet"
+        # The arguments themselves don't need to be quoted if they don't have spaces, but the whole string for --override does.
+        # Let's ensure the arguments for VS installer are correctly formatted for the --override.
+        # The args like --add don't need their own quotes if they are single tokens.
+
+        # Simpler approach for override: winget expects the arguments to the installer *after* --override as a single string.
+        # However, current `run_command` might split them if not careful with shell=True/False.
+        # Let's form the command string carefully.
+        # `winget install <package> --override "--arg1 --arg2"`
+        # The `install_winget_packages` method is more suited for simple package names.
+        # We'll call `run_command` directly here for more control.
+
+        # Command structure: winget install <ID> [options for winget] --override "args for installer"
+        # Our run_command passes the command as a string if shell=True.
+        # Shell=True is default for winget commands in run_command.
+        msvc_command = f'winget install {package_id} --accept-package-agreements --accept-source-agreements --override "{installer_args}"'
+
+        self.print_step(f"Ejecutando: {msvc_command}", "info")
+        exit_code, output = self.run_command(msvc_command) # run_command handles winget's "already installed" code 2316632107 as success (0)
+
+        if exit_code == 0:
+            self.print_step("MSVC Build Tools instalados/verificados correctamente.", "success")
+            return True
+        else:
+            # If it was the "already installed" code that run_command didn't specifically handle for *this package*
+            # (because run_command's special handling is for " install " in general, not specific package results),
+            # we might need to check output too.
+            # For now, trust that if run_command returns non-zero, it's a genuine failure for this context.
+            self.print_step(f"Falló la instalación/verificación de MSVC Build Tools (código: {exit_code}).", "error")
+            self.print_step(f"Salida: {output}", "info")
+            # No time.sleep here as this is a sub-step of Rust install; Rust install itself may pause.
+            return False
 
     def setup_project_structure(self) -> bool:
         """Configura la estructura del proyecto"""
