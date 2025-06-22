@@ -493,6 +493,12 @@ class SystemInstaller:
             "pyjwt==2.8.0"
         ]
         
+        # Set PYO3_USE_ABI3_FORWARD_COMPATIBILITY for Rust-based packages
+        original_pyo3_env = os.environ.get("PYO3_USE_ABI3_FORWARD_COMPATIBILITY")
+        os.environ["PYO3_USE_ABI3_FORWARD_COMPATIBILITY"] = "1"
+        self.print_step("Establecido PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 para la instalación de dependencias.", "info")
+
+        all_deps_installed = True
         for dep in backend_deps:
             exit_code, output = self.run_command(f"{sys.executable} -m pip install {dep}")
             if exit_code != 0:
@@ -500,7 +506,19 @@ class SystemInstaller:
                 if self.is_admin:
                     self.print_step(f"La instalación de {dep} falló. La ventana se cerrará en 20 segundos...", "info")
                     time.sleep(20)
-                return False
+                all_deps_installed = False
+                break # Stop on first error
+
+        # Restore original PYO3_USE_ABI3_FORWARD_COMPATIBILITY value
+        if original_pyo3_env is None:
+            if "PYO3_USE_ABI3_FORWARD_COMPATIBILITY" in os.environ: # Check before deleting
+                del os.environ["PYO3_USE_ABI3_FORWARD_COMPATIBILITY"]
+        else:
+            os.environ["PYO3_USE_ABI3_FORWARD_COMPATIBILITY"] = original_pyo3_env
+        self.print_step("Restaurado el valor original de PYO3_USE_ABI3_FORWARD_COMPATIBILITY.", "info")
+
+        if not all_deps_installed:
+            return False
         
         self.print_step("Dependencias de Python instaladas", "success")
         return True
