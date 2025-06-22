@@ -487,7 +487,7 @@ class SystemInstaller:
             "docker==6.1.3",
             "asyncio",
             "websockets==11.0.3",
-            "pydantic==2.6.4", # Downgrading from 2.7.1 to test Python 3.13 compatibility
+            "pydantic==2.5.3", # Downgrading further to test Python 3.13 compatibility
             "python-multipart==0.0.6",
             "bcrypt==4.1.2",
             "pyjwt==2.8.0"
