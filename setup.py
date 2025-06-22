@@ -519,7 +519,7 @@ class SystemInstaller:
 
         if any_error_occurred:
             self.print_step("Uno o más errores ocurrieron durante la instalación de dependencias de Python.", "error")
-            input("Presiona Enter para salir...")
+            # input("Presiona Enter para salir...") # Moved to main error handling
             return False
         
         self.print_step("Dependencias de Python instaladas", "success")
@@ -1460,6 +1460,7 @@ def main():
             if installer.is_admin and 'log_file_path' in locals():
                 with open(log_file_path, "a", encoding="utf-8") as log_file:
                     log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] run_installation() returned False.\n")
+            input("Presiona Enter para salir...")
             sys.exit(1)
             
     except KeyboardInterrupt:
@@ -1467,14 +1468,14 @@ def main():
         if 'log_file_path' in locals() and installer.is_admin:
              with open(log_file_path, "a", encoding="utf-8") as log_file:
                 log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Installation cancelled by user.\n")
-        # Removed input() here for now, relying on specific sleeps for targeted debugging.
+        input("Presiona Enter para salir...")
         sys.exit(1)
     except Exception as e:
         installer.print_step(f"Error inesperado: {e}", "error")
         if 'log_file_path' in locals() and installer.is_admin: # Redundant check for log_file_path, but safe
             with open(log_file_path, "a", encoding="utf-8") as log_file:
                 log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Unexpected error: {e}\n")
-        # Removed input() here for now, relying on specific sleeps for targeted debugging.
+        input("Presiona Enter para salir...")
         sys.exit(1)
 
     # For successful completion, the input() prompt for starting the system already keeps the window open.
