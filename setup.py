@@ -186,8 +186,8 @@ class SystemInstaller:
         color = colors.get(step_type, Colors.OKBLUE)
         print(f"{color}[MANUS SETUP] {message}{Colors.ENDC}")
     
-    def run_command(self, command: str, shell: bool = True, check: bool = True) -> Tuple[bool, str]:
-        """Ejecuta un comando y retorna el resultado (success, output_or_error_message)"""
+    def run_command(self, command: str, shell: bool = True, check: bool = True) -> Tuple[int, str]:
+        """Ejecuta un comando y retorna el resultado (exit_code, output_message)"""
         is_winget_command = isinstance(command, str) and "winget" in command
 
         try:
@@ -197,50 +197,48 @@ class SystemInstaller:
                 cmd_list = command
 
             if is_winget_command:
-                # For winget, capture combined stdout/stderr and don't raise on error immediately
                 process = subprocess.run(
                     cmd_list,
                     shell=shell,
-                    stdout=subprocess.PIPE,    # Capture stdout
-                    stderr=subprocess.STDOUT,  # Redirect stderr to stdout stream
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                     text=True,
-                    check=False                # We'll check returncode manually
+                    check=False
                 )
-                # process.stdout will contain merged output
-                return process.returncode == 0, process.stdout.strip()
-            else:
-                # Behavior for non-winget commands
-                if check: # If check=True, we want CalledProcessError on failure
+                return process.returncode, process.stdout.strip()
+            else: # Non-winget commands
+                if check: # If check=True, raise CalledProcessError on failure
                     process = subprocess.run(
                         cmd_list,
                         shell=shell,
-                        capture_output=True, # Uses PIPE for stdout and stderr
+                        capture_output=True,
                         text=True,
-                        check=True # Will raise CalledProcessError on non-zero return
+                        check=True
                     )
-                    return True, process.stdout.strip()
+                    return 0, process.stdout.strip() # Success is exit code 0
                 else: # If check=False, manually check return code and capture output
                     process = subprocess.run(
                         cmd_list,
                         shell=shell,
-                        capture_output=True, # Uses PIPE for stdout and stderr
+                        capture_output=True,
                         text=True,
                         check=False
                     )
-                    if process.returncode == 0:
-                        return True, process.stdout.strip()
-                    else:
-                        # For non-winget, non-checking calls, return stderr if available, else stdout
-                        # This behavior might need refinement based on specific non-winget, non-checking call sites
-                        error_output = process.stderr.strip() if process.stderr else process.stdout.strip()
-                        return False, error_output
+                    output_msg = process.stdout.strip() if process.returncode == 0 else \
+                                 (process.stderr.strip() if process.stderr else process.stdout.strip())
+                    return process.returncode, output_msg
 
         except subprocess.CalledProcessError as e:
-            # This will be hit by non-winget commands with check=True that fail
-            return False, e.stderr.strip() if e.stderr else str(e)
+            # For non-winget commands with check=True that fail
+            return e.returncode, e.stderr.strip() if e.stderr else str(e)
+        except FileNotFoundError as e:
+            # Command not found
+            self.print_step(f"Comando no encontrado: {cmd_list[0] if isinstance(cmd_list, list) else cmd_list}. Error: {e}", "error")
+            return -1, str(e) # Use a distinct error code like -1 for command not found
         except Exception as e:
             # General exceptions
-            return False, str(e)
+            self.print_step(f"Excepción inesperada ejecutando comando: {cmd_list}. Error: {e}", "error")
+            return -2, str(e) # Use a distinct error code like -2 for other exceptions
     
     def download_file(self, url: str, destination: Path) -> bool:
         """Descarga un archivo"""
@@ -260,16 +258,13 @@ class SystemInstaller:
         for package in packages:
             self.print_step(f"Instalando {package} con winget")
             command = f"winget install {package} --accept-package-agreements --accept-source-agreements"
-            # For winget, run_command now returns (returncode == 0, combined_stdout_stderr)
-            success, combined_output = self.run_command(command)
+            exit_code, combined_output = self.run_command(command)
 
-            if not success:
-                self.print_step(f"Error instalando {package} con winget. Salida del comando:", "error")
-                # Print the raw combined output from winget, which includes stderr
-                # Using print() directly to avoid [MANUS SETUP] prefix for this raw output block
-                print(Colors.FAIL + combined_output.strip() + Colors.ENDC)
+            if exit_code != 0:
+                self.print_step(f"Error instalando {package} con winget (código de salida: {exit_code}). Salida del comando:", "error")
+                print(Colors.FAIL + combined_output + Colors.ENDC) # combined_output is already stripped by run_command
 
-                if self.is_admin: # Add delay only if admin and error occurred
+                if self.is_admin:
                     self.print_step(f"La instalación de {package} falló. La ventana se cerrará en 20 segundos...", "info")
                     time.sleep(20)
                 return False
@@ -281,21 +276,17 @@ class SystemInstaller:
         
         if self.system == "windows":
             self.print_step("Verificando si Docker ya está instalado y operativo en Windows...")
-            # Try to run 'docker --version'. We use check=False because we expect it to fail if Docker isn't installed.
-            # The output of 'docker --version' isn't critical here, just its success.
-            docker_check_success, docker_version_output = self.run_command("docker --version", check=False)
+            docker_version_exit_code, docker_version_output = self.run_command("docker --version", check=False)
 
-            if docker_check_success:
+            if docker_version_exit_code == 0:
                 self.print_step(f"Docker ya está instalado y respondiendo: {docker_version_output.splitlines()[0] if docker_version_output else 'OK'}", "success")
-                # Also, ensure Docker service is actually running, not just CLI present
-                # A simple way is to try 'docker ps', which requires the daemon.
                 self.print_step("Verificando si el servicio Docker está en ejecución...")
-                docker_ps_success, docker_ps_output = self.run_command("docker ps", check=False)
-                if docker_ps_success:
+                docker_ps_exit_code, docker_ps_output = self.run_command("docker ps", check=False)
+                if docker_ps_exit_code == 0:
                     self.print_step("El servicio Docker está en ejecución.", "success")
                     return True # Docker is installed and running
                 else:
-                    self.print_step("Docker CLI está presente, pero el servicio Docker no responde. Se intentará la instalación/reparación.", "warning")
+                    self.print_step(f"Docker CLI está presente (código de salida 'docker ps': {docker_ps_exit_code}), pero el servicio Docker no responde. Se intentará la instalación/reparación.", "warning")
                     self.print_step(f"Salida de 'docker ps': {docker_ps_output}", "info")
             else:
                 self.print_step("Docker no parece estar instalado o no está en PATH. Se procederá con la instalación.", "info")
@@ -327,47 +318,59 @@ class SystemInstaller:
                 self.print_step("Error instalando Docker en macOS", "error")
                 return False
         
-        # Verificar instalación
-        time.sleep(10)  # Esperar a que Docker se inicie
-        success, _ = self.run_command("docker --version")
-        if success:
-            self.print_step("Docker instalado correctamente", "success")
-            return True
-        else:
-            self.print_step("Error verificando Docker", "error")
-            return False
+        # Verificar instalación (Este código es para Linux/Mac después de sus instalaciones específicas)
+        # Para Windows, la verificación ya está integrada arriba o se maneja por winget.
+        if self.system != "windows":
+            time.sleep(10)  # Esperar a que Docker se inicie
+            exit_code, _ = self.run_command("docker --version")
+            if exit_code == 0:
+                self.print_step("Docker instalado correctamente", "success")
+                return True
+            else:
+                self.print_step("Error verificando Docker post-instalación", "error")
+                return False
+        return True # If windows, it would have returned earlier from pre-check or winget call.
     
     def install_nodejs(self) -> bool:
         """Instala Node.js"""
         self.print_step("Instalando Node.js...")
         
+        install_success = False
         if self.system == "windows":
-            return self.install_winget_packages(["OpenJS.NodeJS"])
+            install_success = self.install_winget_packages(["OpenJS.NodeJS"])
         
         elif self.system == "linux":
             commands = [
                 "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -",
                 "apt-get install -y nodejs"
             ]
-            
+            all_succeeded = True
             for cmd in commands:
-                success, output = self.run_command(cmd)
-                if not success:
-                    self.print_step(f"Error ejecutando: {cmd}", "error")
-                    return False
+                exit_code, output = self.run_command(cmd)
+                if exit_code != 0:
+                    self.print_step(f"Error ejecutando: {cmd} (código: {exit_code}): {output}", "error")
+                    all_succeeded = False
+                    break
+            install_success = all_succeeded
         
         elif self.system == "darwin":
-            success, _ = self.run_command("brew install node")
-            if not success:
-                return False
+            exit_code, _ = self.run_command("brew install node")
+            install_success = (exit_code == 0)
+            if not install_success:
+                 self.print_step(f"Error instalando Node.js con Homebrew (código: {exit_code})", "error")
+
+        if not install_success:
+            self.print_step("Falló la instalación de Node.js.", "error")
+            return False
         
         # Verificar instalación
-        success, _ = self.run_command("node --version")
-        if success:
-            self.print_step("Node.js instalado correctamente", "success")
+        self.print_step("Verificando instalación de Node.js...")
+        node_exit_code, node_version_output = self.run_command("node --version", check=False)
+        if node_exit_code == 0:
+            self.print_step(f"Node.js instalado correctamente: {node_version_output}", "success")
             return True
         else:
-            self.print_step("Error verificando Node.js", "error")
+            self.print_step(f"Error verificando Node.js (código: {node_exit_code}): {node_version_output}", "error")
             return False
     
     def install_ollama(self) -> bool:
@@ -380,27 +383,44 @@ class SystemInstaller:
             installer_path = temp_dir / "ollama-installer.exe"
             
             if self.download_file(self.urls["ollama"]["windows"], installer_path):
-                success, _ = self.run_command(f'"{installer_path}" /S')
-                if success:
+                # Installer might not give useful stdout/stderr, focus on exit code
+                exit_code, _ = self.run_command(f'"{installer_path}" /S', check=False)
+                if exit_code == 0:
                     self.print_step("Ollama instalado correctamente", "success")
+                    # Attempt to start Ollama service on Windows if applicable, or verify
+                    self.run_command("ollama serve", check=False) # Non-critical if this fails to start immediately
                     return True
+                else:
+                    self.print_step(f"Falló el instalador de Ollama (código: {exit_code})", "error")
         
         elif self.system == "linux":
-            success, _ = self.run_command("curl -fsSL https://ollama.ai/install.sh | sh")
-            if success:
+            exit_code, output = self.run_command("curl -fsSL https://ollama.ai/install.sh | sh")
+            if exit_code == 0:
+                self.print_step("Script de instalación de Ollama ejecutado.", "info")
                 # Iniciar servicio
-                self.run_command("systemctl enable ollama")
-                self.run_command("systemctl start ollama")
-                self.print_step("Ollama instalado correctamente", "success")
-                return True
+                self.run_command("systemctl enable ollama", check=False) # Best effort
+                self.run_command("systemctl start ollama", check=False)  # Best effort
+                # Verify ollama
+                ollama_check_exit_code, _ = self.run_command("ollama --version", check=False)
+                if ollama_check_exit_code == 0:
+                    self.print_step("Ollama instalado y verificado correctamente", "success")
+                    return True
+                else:
+                    self.print_step("Ollama se instaló pero la verificación falló.", "warning")
+                    return False # Or True if partial success is okay
+            else:
+                self.print_step(f"Falló la descarga/ejecución del script de Ollama (código: {exit_code}): {output}", "error")
         
         elif self.system == "darwin":
-            success, _ = self.run_command("brew install ollama")
-            if success:
-                self.print_step("Ollama instalado correctamente", "success")
+            exit_code, _ = self.run_command("brew install ollama")
+            if exit_code == 0:
+                self.print_step("Ollama instalado correctamente vía Homebrew", "success")
+                self.run_command("ollama serve", check=False) # Non-critical if this fails to start immediately
                 return True
+            else:
+                self.print_step(f"Falló la instalación de Ollama con Homebrew (código: {exit_code})", "error")
         
-        self.print_step("Error instalando Ollama", "error")
+        self.print_step("Error general instalando Ollama", "error")
         return False
     
     def install_python_dependencies(self) -> bool:
@@ -408,9 +428,9 @@ class SystemInstaller:
         self.print_step("Instalando dependencias de Python...")
         
         # Actualizar pip
-        success, _ = self.run_command(f"{sys.executable} -m pip install --upgrade pip")
-        if not success:
-            self.print_step("Error actualizando pip", "error")
+        pip_upgrade_exit_code, pip_upgrade_output = self.run_command(f"{sys.executable} -m pip install --upgrade pip")
+        if pip_upgrade_exit_code != 0:
+            self.print_step(f"Error actualizando pip (código: {pip_upgrade_exit_code}): {pip_upgrade_output}", "error")
             return False
         
         # Instalar dependencias del backend
@@ -431,9 +451,9 @@ class SystemInstaller:
         ]
         
         for dep in backend_deps:
-            success, output = self.run_command(f"{sys.executable} -m pip install {dep}")
-            if not success:
-                self.print_step(f"Error instalando {dep}: {output}", "error")
+            exit_code, output = self.run_command(f"{sys.executable} -m pip install {dep}")
+            if exit_code != 0:
+                self.print_step(f"Error instalando {dep} (código: {exit_code}): {output}", "error")
                 return False
         
         self.print_step("Dependencias de Python instaladas", "success")
@@ -924,6 +944,7 @@ echo "Sistema detenido."
         self.print_step("Instalando modelos de Ollama...")
         
         # Iniciar Ollama si no está ejecutándose
+        # We use check=False as it might already be running or fail gracefully if not yet fully installed.
         self.run_command("ollama serve", check=False)
         time.sleep(5)
         
@@ -932,46 +953,77 @@ echo "Sistema detenido."
         
         for model in models:
             self.print_step(f"Descargando modelo {model}...")
-            success, output = self.run_command(f"ollama pull {model}")
-            if success:
+            # Using check=True here as 'ollama pull' should ideally succeed.
+            # If it fails, we print a warning but continue with other models.
+            exit_code, output = self.run_command(f"ollama pull {model}", check=True)
+            if exit_code == 0:
                 self.print_step(f"Modelo {model} instalado", "success")
             else:
-                self.print_step(f"Error instalando {model}: {output}", "warning")
+                self.print_step(f"Error instalando {model} (código: {exit_code}): {output}", "warning")
         
-        return True
+        return True # This step is best-effort for models.
     
     def setup_database(self) -> bool:
         """Configura la base de datos"""
         self.print_step("Configurando base de datos...")
         
-        try:
-            # Iniciar PostgreSQL con Docker
-            success, _ = self.run_command("docker run -d --name manus-postgres-setup -e POSTGRES_DB=manus_db -e POSTGRES_USER=manus_user -e POSTGRES_PASSWORD=manus_password_2024 -p 5432:5432 postgres:15")
+        # Start PostgreSQL with Docker for setup
+        # Using check=True as these Docker operations are critical for DB setup.
+        pg_setup_cmd = "docker run -d --name manus-postgres-setup -e POSTGRES_DB=manus_db -e POSTGRES_USER=manus_user -e POSTGRES_PASSWORD=manus_password_2024 -p 5432:5432 postgres:15"
+        exit_code_run, output_run = self.run_command(pg_setup_cmd, check=True)
+
+        if exit_code_run != 0:
+            self.print_step(f"Error iniciando contenedor PostgreSQL para setup (código: {exit_code_run}): {output_run}", "error")
+            return False
             
-            if success:
-                time.sleep(10)  # Esperar a que PostgreSQL se inicie
-                
-                # Ejecutar scripts de inicialización
-                init_script = self.install_dir / "config" / "supabase_init.sql"
-                data_script = self.install_dir / "config" / "initial_data.sql"
-                
-                if init_script.exists():
-                    self.run_command(f"docker exec -i manus-postgres-setup psql -U manus_user -d manus_db < {init_script}")
-                
-                if data_script.exists():
-                    self.run_command(f"docker exec -i manus-postgres-setup psql -U manus_user -d manus_db < {data_script}")
-                
-                # Detener contenedor temporal
-                self.run_command("docker stop manus-postgres-setup")
-                self.run_command("docker rm manus-postgres-setup")
-                
-                self.print_step("Base de datos configurada", "success")
-                return True
+        self.print_step("Contenedor PostgreSQL para setup iniciado. Esperando 10s...", "info")
+        time.sleep(10)  # Esperar a que PostgreSQL se inicie
             
-        except Exception as e:
-            self.print_step(f"Error configurando base de datos: {e}", "error")
+        init_script = self.install_dir / "config" / "supabase_init.sql"
+        data_script = self.install_dir / "config" / "initial_data.sql"
         
-        return False
+        db_setup_ok = True
+        if init_script.exists():
+            self.print_step(f"Ejecutando script de inicialización: {init_script}")
+            # Note: Input redirection might be tricky with run_command's current shell handling.
+            # Consider using Popen directly for commands with input redirection if issues arise.
+            # For now, assuming simple exec commands.
+            # This command structure is problematic for self.run_command as it involves redirection.
+            # Let's use a more direct approach or adjust run_command if this specific pattern is frequent.
+            # Simplified for now:
+            # exit_code_init, out_init = self.run_command(f"docker exec -i manus-postgres-setup psql -U manus_user -d manus_db < \"{init_script}\"", check=True)
+            # This type of command with redirection is better handled by shell=True and as a single string.
+            cmd_init = f"docker exec -i manus-postgres-setup psql -U manus_user -d manus_db < \"{init_script.resolve()}\""
+            exit_code_init, out_init = self.run_command(cmd_init, shell=True, check=True) # Explicitly shell=True
+            if exit_code_init != 0:
+                self.print_step(f"Error ejecutando script de inicialización DB (código: {exit_code_init}): {out_init}", "error")
+                db_setup_ok = False
+
+        if db_setup_ok and data_script.exists():
+            self.print_step(f"Ejecutando script de datos iniciales: {data_script}")
+            cmd_data = f"docker exec -i manus-postgres-setup psql -U manus_user -d manus_db < \"{data_script.resolve()}\""
+            exit_code_data, out_data = self.run_command(cmd_data, shell=True, check=True) # Explicitly shell=True
+            if exit_code_data != 0:
+                self.print_step(f"Error ejecutando script de datos DB (código: {exit_code_data}): {out_data}", "error")
+                db_setup_ok = False
+
+        # Stop and remove temporary container
+        self.print_step("Deteniendo contenedor PostgreSQL de setup...")
+        exit_code_stop, out_stop = self.run_command("docker stop manus-postgres-setup", check=True)
+        if exit_code_stop != 0:
+            self.print_step(f"Advertencia: No se pudo detener el contenedor manus-postgres-setup (código: {exit_code_stop}): {out_stop}", "warning")
+            # Not returning False here, as DB scripts might have run.
+
+        exit_code_rm, out_rm = self.run_command("docker rm manus-postgres-setup", check=True)
+        if exit_code_rm != 0:
+            self.print_step(f"Advertencia: No se pudo remover el contenedor manus-postgres-setup (código: {exit_code_rm}): {out_rm}", "warning")
+
+        if db_setup_ok:
+            self.print_step("Base de datos configurada", "success")
+            return True
+        else:
+            self.print_step("Falló la configuración de la base de datos.", "error")
+            return False
     
     def install_frontend_dependencies(self) -> bool:
         """Instala dependencias del frontend"""
@@ -985,20 +1037,24 @@ echo "Sistema detenido."
             os.chdir(frontend_dir)
             
             # Instalar dependencias
-            success, output = self.run_command("npm install")
+            self.print_step(f"Ejecutando 'npm install' en {frontend_dir}...")
+            exit_code, output = self.run_command("npm install") # Defaults to shell=True, check=True
             
             # Volver al directorio original
             os.chdir(original_dir)
             
-            if success:
+            if exit_code == 0:
                 self.print_step("Dependencias del frontend instaladas", "success")
                 return True
             else:
-                self.print_step(f"Error instalando dependencias: {output}", "error")
+                self.print_step(f"Error instalando dependencias del frontend (código: {exit_code}): {output}", "error")
                 return False
                 
-        except Exception as e:
-            self.print_step(f"Error: {e}", "error")
+        except Exception as e: # Catches errors like os.chdir failing
+            self.print_step(f"Error excepcional durante instalación de dependencias frontend: {e}", "error")
+            # Ensure we change back to original_dir if an exception occurred after os.chdir but before the second os.chdir
+            if 'original_dir' in locals() and Path.cwd() != Path(original_dir):
+                 os.chdir(original_dir)
             return False
     
     def create_desktop_shortcut(self) -> bool:
@@ -1026,8 +1082,12 @@ $Shortcut.Save()
                     f.write(ps_script)
                     ps_file = f.name
                 
-                self.run_command(f"powershell -ExecutionPolicy Bypass -File {ps_file}")
-                os.unlink(ps_file)
+                # This command is primarily for its side effect; output isn't critical.
+                # Using check=False as failure here is not fatal for the whole setup.
+                exit_code, ps_output = self.run_command(f"powershell -ExecutionPolicy Bypass -File \"{ps_file}\"", check=False)
+                if exit_code != 0:
+                    self.print_step(f"Advertencia: Falló la creación del acceso directo con PowerShell (código: {exit_code}): {ps_output}", "warning")
+                os.unlink(ps_file) # Clean up temp file
             
             elif self.system == "linux":
                 # Crear archivo .desktop en Linux
