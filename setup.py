@@ -504,7 +504,81 @@ class SystemInstaller:
         
         self.print_step("Dependencias de Python instaladas", "success")
         return True
-    
+
+    def install_rust(self) -> bool:
+        """Instala Rust y Cargo si no están presentes."""
+        self.print_step("Verificando Rust (Cargo)...")
+        exit_code, cargo_version_output = self.run_command("cargo --version", check=False)
+        if exit_code == 0:
+            self.print_step(f"Rust (Cargo) ya está instalado: {cargo_version_output.splitlines()[0] if cargo_version_output else 'OK'}", "success")
+            return True
+
+        self.print_step("Rust (Cargo) no encontrado. Intentando instalar Rustup...", "info")
+        rustup_install_successful = False
+
+        if self.system == "windows":
+            temp_dir = Path(tempfile.gettempdir())
+            rustup_installer_path = temp_dir / "rustup-init.exe"
+            rustup_url = "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe"
+
+            if self.download_file(rustup_url, rustup_installer_path):
+                self.print_step("Ejecutando instalador de Rustup (rustup-init.exe)...")
+                # Using --no-modify-path because we'll add it to PATH for the current process manually.
+                # Profile default to ensure common components like rust-std are available.
+                install_cmd = [str(rustup_installer_path.resolve()), "-y", "--default-toolchain", "stable", "--profile", "default", "--no-modify-path"]
+                exit_code_install, output_install = self.run_command(install_cmd, shell=False, check=False)
+
+                if exit_code_install == 0:
+                    self.print_step("Rustup instalado correctamente.", "success")
+                    rustup_install_successful = True
+                else:
+                    self.print_step(f"Falló la instalación de Rustup (código: {exit_code_install}). Salida: {output_install}", "error")
+
+                # Clean up installer
+                try:
+                    os.unlink(rustup_installer_path)
+                except OSError as e:
+                    self.print_step(f"Advertencia: no se pudo eliminar {rustup_installer_path}: {e}", "warning")
+            else:
+                self.print_step(f"Falló la descarga de rustup-init.exe desde {rustup_url}", "error")
+
+        elif self.system in ["linux", "darwin"]:
+            # Using the recommended curl | sh method
+            # sh -s -- -y installs with default options non-interactively.
+            # --no-modify-path to handle PATH update manually for current process.
+            # Profile default for necessary components.
+            rustup_script_cmd = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile default --no-modify-path"
+            self.print_step("Descargando y ejecutando script de Rustup...")
+            exit_code_install, output_install = self.run_command(rustup_script_cmd, shell=True, check=False) # shell=True needed for pipes
+
+            if exit_code_install == 0:
+                self.print_step("Rustup instalado correctamente.", "success")
+                rustup_install_successful = True
+            else:
+                self.print_step(f"Falló la instalación de Rustup (código: {exit_code_install}). Salida: {output_install}", "error")
+        else:
+            self.print_step(f"Instalación de Rust no soportada para el sistema: {self.system}", "warning")
+            return False # Or True if Rust is optional and we can proceed without it. Assuming False for now.
+
+        if rustup_install_successful:
+            # Add $HOME/.cargo/bin or %USERPROFILE%/.cargo/bin to PATH for the current process
+            cargo_bin_path = str(Path.home() / ".cargo" / "bin")
+            self.print_step(f"Añadiendo {cargo_bin_path} al PATH para la sesión actual...")
+            os.environ["PATH"] = cargo_bin_path + os.pathsep + os.environ["PATH"]
+
+            # Verify installation again
+            self.print_step("Verificando Cargo después de la instalación...")
+            exit_code_verify, cargo_version_output_verify = self.run_command("cargo --version", check=False)
+            if exit_code_verify == 0:
+                self.print_step(f"Rust (Cargo) instalado y verificado: {cargo_version_output_verify.splitlines()[0] if cargo_version_output_verify else 'OK'}", "success")
+                return True
+            else:
+                self.print_step(f"Cargo se instaló, pero la verificación falló (código: {exit_code_verify}). Es posible que necesite reiniciar la terminal/shell o el sistema. Salida: {cargo_version_output_verify}", "error")
+                return False # Failed to verify after install
+
+        self.print_step("La instalación de Rust falló.", "error")
+        return False
+
     def setup_project_structure(self) -> bool:
         """Configura la estructura del proyecto"""
         self.print_step("Configurando estructura del proyecto...")
@@ -1200,6 +1274,7 @@ StartupNotify=true
             ("Instalando Docker", self.install_docker),
             ("Instalando Node.js", self.install_nodejs),
             ("Instalando Ollama", self.install_ollama),
+            ("Instalando Rust (si es necesario)", self.install_rust), # Added Rust installation step
             ("Instalando dependencias Python", self.install_python_dependencies),
             ("Instalando dependencias frontend", self.install_frontend_dependencies),
             ("Creando configuración Docker", self.create_docker_compose),
