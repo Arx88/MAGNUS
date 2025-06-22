@@ -487,7 +487,7 @@ class SystemInstaller:
             "docker==6.1.3",
             "asyncio",
             "websockets==11.0.3",
-            "pydantic==2.5.0",
+            "pydantic==2.7.1", # Updated from 2.5.0
             "python-multipart==0.0.6",
             "bcrypt==4.1.2",
             "pyjwt==2.8.0"
