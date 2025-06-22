@@ -187,24 +187,43 @@ class SystemInstaller:
         print(f"{color}[MANUS SETUP] {message}{Colors.ENDC}")
     
     def run_command(self, command: str, shell: bool = True, check: bool = True) -> Tuple[bool, str]:
-        """Ejecuta un comando y retorna el resultado"""
+        """Ejecuta un comando y retorna el resultado (success, output_or_error_message)"""
+        is_winget_command = isinstance(command, str) and "winget" in command
+
         try:
             if isinstance(command, str):
-                cmd = command if shell else command.split()
+                cmd_list = command if shell else command.split()
+            else: # command is already a list
+                cmd_list = command
+
+            if is_winget_command:
+                # For winget, capture combined stdout/stderr and don't raise on error immediately
+                process = subprocess.run(
+                    cmd_list,
+                    shell=shell, # shell=True might be needed if command is a string with args
+                    capture_output=True,
+                    text=True,
+                    stderr=subprocess.STDOUT, # Redirect stderr to stdout
+                    check=False # We'll check returncode manually
+                )
+                # process.stdout will contain merged output
+                return process.returncode == 0, process.stdout
             else:
-                cmd = command
-            
-            result = subprocess.run(
-                cmd,
-                shell=shell,
-                capture_output=True,
-                text=True,
-                check=check
-            )
-            return True, result.stdout
+                # Original behavior for non-winget commands
+                process = subprocess.run(
+                    cmd_list,
+                    shell=shell,
+                    capture_output=True,
+                    text=True,
+                    check=check # Let it raise CalledProcessError for non-winget if check is True
+                )
+                return True, process.stdout
+
         except subprocess.CalledProcessError as e:
+            # This will now primarily be for non-winget commands if check=True
             return False, e.stderr
         except Exception as e:
+            # General exceptions
             return False, str(e)
     
     def download_file(self, url: str, destination: Path) -> bool:
@@ -224,9 +243,19 @@ class SystemInstaller:
         
         for package in packages:
             self.print_step(f"Instalando {package} con winget")
-            success, output = self.run_command(f"winget install {package} --accept-package-agreements --accept-source-agreements")
+            command = f"winget install {package} --accept-package-agreements --accept-source-agreements"
+            # For winget, run_command now returns (returncode == 0, combined_stdout_stderr)
+            success, combined_output = self.run_command(command)
+
             if not success:
-                self.print_step(f"Error instalando {package}: {output}", "error")
+                self.print_step(f"Error instalando {package} con winget. Salida del comando:", "error")
+                # Print the raw combined output from winget, which includes stderr
+                # Using print() directly to avoid [MANUS SETUP] prefix for this raw output block
+                print(Colors.FAIL + combined_output.strip() + Colors.ENDC)
+
+                if self.is_admin: # Add delay only if admin and error occurred
+                    self.print_step(f"La instalación de {package} falló. La ventana se cerrará en 20 segundos...", "info")
+                    time.sleep(20)
                 return False
         return True
     
@@ -1141,16 +1170,14 @@ def main():
         if 'log_file_path' in locals() and installer.is_admin:
              with open(log_file_path, "a", encoding="utf-8") as log_file:
                 log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Installation cancelled by user.\n")
-        if installer.is_admin: # Keep console open on error
-            input("Presione Enter para salir...")
+        # Removed input() here for now, relying on specific sleeps for targeted debugging.
         sys.exit(1)
     except Exception as e:
         installer.print_step(f"Error inesperado: {e}", "error")
         if 'log_file_path' in locals() and installer.is_admin: # Redundant check for log_file_path, but safe
             with open(log_file_path, "a", encoding="utf-8") as log_file:
                 log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Unexpected error: {e}\n")
-        if installer.is_admin: # Keep console open on error
-            input("Presione Enter para salir...")
+        # Removed input() here for now, relying on specific sleeps for targeted debugging.
         sys.exit(1)
 
     # For successful completion, the input() prompt for starting the system already keeps the window open.
