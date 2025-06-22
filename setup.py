@@ -386,23 +386,53 @@ class SystemInstaller:
     def install_ollama(self) -> bool:
         """Instala Ollama"""
         self.print_step("Instalando Ollama...")
-        
+
+        # Pre-check if Ollama is already installed
+        self.print_step("Verificando si Ollama ya está instalado...")
+        ollama_check_exit_code, ollama_version_output = self.run_command("ollama --version", check=False)
+        if ollama_check_exit_code == 0:
+            self.print_step(f"Ollama ya está instalado y respondiendo: {ollama_version_output.splitlines()[0] if ollama_version_output else 'OK'}", "success")
+            # Optionally, ensure the service is running, though 'ollama --version' might be sufficient
+            # For simplicity, we'll assume if CLI works, it's usable or can be started.
+            return True
+        else:
+            self.print_step("Ollama no parece estar instalado o no está en PATH. Se procederá con la instalación.", "info")
+
         if self.system == "windows":
             # Descargar e instalar Ollama para Windows
             temp_dir = Path(tempfile.gettempdir())
-            installer_path = temp_dir / "ollama-installer.exe"
+            installer_path = temp_dir / "ollama-installer.exe" # This is a Path object
             
             if self.download_file(self.urls["ollama"]["windows"], installer_path):
-                # Installer might not give useful stdout/stderr, focus on exit code
-                exit_code, _ = self.run_command(f'"{installer_path}" /S', check=False)
+                resolved_installer_path = str(installer_path.resolve())
+                self.print_step(f"Ejecutando instalador de Ollama desde: {resolved_installer_path}")
+
+                # Try with shell=False first, which is generally safer for paths
+                cmd_list = [resolved_installer_path, "/S"]
+                exit_code, output = self.run_command(cmd_list, shell=False, check=False)
+
                 if exit_code == 0:
-                    self.print_step("Ollama instalado correctamente", "success")
-                    # Attempt to start Ollama service on Windows if applicable, or verify
-                    self.run_command("ollama serve", check=False) # Non-critical if this fails to start immediately
-                    return True
+                    self.print_step("Ollama instalado correctamente.", "success")
+                    self.run_command("ollama serve", check=False)
+                    # Verify after attempting install
+                    ollama_verify_exit_code, _ = self.run_command("ollama --version", check=False)
+                    if ollama_verify_exit_code == 0:
+                        self.print_step("Verificación de Ollama post-instalación exitosa.", "success")
+                        return True
+                    else:
+                        self.print_step("Ollama se instaló, pero la verificación post-instalación falló.", "warning")
+                        return False # Or True if this state is acceptable
                 else:
-                    self.print_step(f"Falló el instalador de Ollama (código: {exit_code})", "error")
-        
+                    self.print_step(f"Falló el instalador de Ollama (código: {exit_code}). Salida: {output}", "error")
+                    # As a fallback, try with shell=True if shell=False failed, though less likely to help with path issues like ??\\
+                    # self.print_step("Intentando de nuevo con shell=True...", "info")
+                    # exit_code_shell_true, output_shell_true = self.run_command(f'"{resolved_installer_path}" /S', shell=True, check=False)
+                    # if exit_code_shell_true == 0: ...
+                    # For now, we'll stick to the primary attempt.
+            else: # Download failed
+                self.print_step("Falló la descarga del instalador de Ollama.", "error")
+                # No return False here, let it fall through to the general error at the end of the function.
+
         elif self.system == "linux":
             exit_code, output = self.run_command("curl -fsSL https://ollama.ai/install.sh | sh")
             if exit_code == 0:
@@ -1180,7 +1210,7 @@ StartupNotify=true
         for i, (description, step_function) in enumerate(steps, 1):
             self.print_step(f"[{i}/{total_steps}] {description}", "info")
             _log_admin_action(f"Starting step [{i}/{total_steps}]: {description}")
-            
+
             step_success = step_function()
 
             if not step_success:
