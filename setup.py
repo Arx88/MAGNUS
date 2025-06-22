@@ -593,12 +593,13 @@ class SystemInstaller:
         # Using --force to ensure it runs even if winget thinks it might be there, to trigger repair/verify
         # However, --force with winget can sometimes be problematic if not used carefully.
         # Let's try without --force first.
-        # The ID for VS Build Tools is typically Microsoft.VisualStudio.BuildTools
+        # The ID for VS Build Tools is typically Microsoft.VisualStudio.BuildTools or Microsoft.VisualStudio.2022.BuildTools
+        # Using Microsoft.VisualStudio.2022.BuildTools for better specificity with newer systems.
         # The workload for C++ is Microsoft.VisualStudio.Workload.VCTools
         # Using --override to pass installer-specific arguments.
         # --quiet should make the VS installer less interactive.
         # --wait ensures winget waits for the (potentially very long) installation.
-        package_id = "Microsoft.VisualStudio.BuildTools"
+        package_id = "Microsoft.VisualStudio.2022.BuildTools"
         installer_args = "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --quiet --wait"
 
         # We need to ensure the installer_args are passed correctly through winget's --override
