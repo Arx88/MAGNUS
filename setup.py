@@ -1518,18 +1518,32 @@ def main():
                 script_to_run = ""
                 if installer.system == "windows":
                     write_very_early_log("main(): System is Windows. Preparing to run start.bat.")
-                    script_to_run = installer.install_dir / "scripts" / "start.bat"
-                    installer.print_step(f"Ejecutando script de inicio: {script_to_run}...", "info")
-                    # Use subprocess.run with arguments to attempt to keep it in the same window
-                    # 'cmd /c start /B your_script.bat'
-                    # The start.bat itself uses 'start /B' for ollama, and 'docker-compose up -d' is non-blocking.
-                    # So, simply calling the bat file with 'cmd /c' should be sufficient if the console is already the elevated one.
-                    # Using 'start /B' here for the .bat might be redundant or even counterproductive if not handled carefully.
-                    # Let's ensure the CWD is correct.
-                    # try original
+                    script_to_run = installer.install_dir / "scripts" / "start.bat" # Necesario para el print_step más adelante
+
+                    # INTENTO DE LOGGING AISLADO Y TEMPRANO para setup_debug_trace.log
+                    early_trace_path_debug = None # Para registrar en caso de error aquí
                     try:
-                        # NUEVO LOGGING DETALLADO
-                        trace_log_file_path = installer.install_dir / "logs" / "setup_debug_trace.log"
+                        write_very_early_log("main(): Windows: Attempting to create logs directory and setup_debug_trace.log (isolated test).")
+                        log_dir_test = installer.install_dir / "logs"
+                        write_very_early_log(f"main(): Windows (isolated test): log_dir_test path is {log_dir_test}")
+
+                        log_dir_test.mkdir(exist_ok=True)
+                        write_very_early_log(f"main(): Windows (isolated test): mkdir for {log_dir_test} attempted (exist_ok=True).")
+
+                        early_trace_path_debug = log_dir_test / "setup_debug_trace.log"
+                        with open(early_trace_path_debug, "a", encoding='utf-8') as etf:
+                            etf.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Test log entry from isolated block. If you see this, directory creation and initial file write worked.\n")
+                        write_very_early_log(f"main(): Windows (isolated test): Successfully wrote test entry to {early_trace_path_debug}.")
+                    except Exception as e_test:
+                        write_very_early_log(f"main(): Windows (isolated test): EXCEPTION in isolated logging attempt for setup_debug_trace.log. Error: {e_test}. Path was: {early_trace_path_debug if early_trace_path_debug else str(installer.install_dir / 'logs' / 'setup_debug_trace.log')}")
+
+                    installer.print_step(f"Ejecutando script de inicio: {script_to_run}...", "info") # Mantener para flujo visual si no crashea antes
+
+                    # try original (ahora con el logging detallado que ya teníamos)
+                    try:
+                        # El NUEVO LOGGING DETALLADO (que ahora usa trace_log_file_path)
+                        # La definición de trace_log_file_path se mueve aquí para que coincida con el original.
+                        trace_log_file_path = installer.install_dir / "logs" / "setup_debug_trace.log" # Esta es la misma ruta que early_trace_path_debug
                         log_dir_for_trace = installer.install_dir / "logs"
                         log_dir_for_trace.mkdir(exist_ok=True) # Asegurar que el directorio de logs existe para el trace log
 
