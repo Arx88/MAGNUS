@@ -1499,9 +1499,13 @@ def main():
             sys.exit(0) # Gracefully exit the non-elevated script
 
         # If we reach here, we are running with admin rights (either initially or after elevation)
-        if installer.is_admin and 'log_file_path' in locals(): # Log before running installation
-             with open(log_file_path, "a", encoding="utf-8") as log_file:
-                log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Admin rights confirmed. Calling run_installation().\n")
+        if installer.is_admin and 'log_file_path' in locals() and log_file_path is not None: # Check log_file_path not None
+             try: # Add try-except for old log
+                with open(log_file_path, "a", encoding="utf-8") as log_f: # Changed variable
+                    log_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Admin rights confirmed. Calling run_installation().\n")
+             except Exception as e:
+                write_very_early_log(f"main(): Warning - Could not write to old elevated log {log_file_path} before run_installation: {e}")
+
 
         if installer.run_installation(): # This is the main execution path for the admin instance
             write_very_early_log("main(): run_installation() completed successfully.")
@@ -1516,13 +1520,13 @@ def main():
             write_very_early_log("main(): Before asking to start the system.")
             if input("\n¿Deseas iniciar el sistema ahora? (s/n): ").lower() in ['s', 'y', 'yes', 'sí']:
                 write_very_early_log("main(): User chose to start the system.")
-                script_to_run = ""
+                # script_to_run = "" # No longer needed as we are integrating logic here
                 if installer.system == "windows":
-                    write_very_early_log("main(): System is Windows. Preparing to run start.bat.")
-                    script_to_run = installer.install_dir / "scripts" / "start.bat" # Necesario para el print_step más adelante
+                    write_very_early_log("main(): System is Windows. Preparing to execute integrated start logic.")
+                    # script_to_run = installer.install_dir / "scripts" / "start.bat" # No longer needed
 
-                    # INTENTO DE LOGGING AISLADO Y TEMPRANO para setup_debug_trace.log
-                    early_trace_path_debug = None # Para registrar en caso de error aquí
+                    # INTENTO DE LOGGING AISLADO Y TEMPRANO para setup_debug_trace.log (debe permanecer)
+                    early_trace_path_debug = None
                     try:
                         write_very_early_log("main(): Windows: Attempting to create logs directory and setup_debug_trace.log (isolated test).")
                         log_dir_test = installer.install_dir / "logs"
@@ -1538,137 +1542,139 @@ def main():
                     except Exception as e_test:
                         write_very_early_log(f"main(): Windows (isolated test): EXCEPTION in isolated logging attempt for setup_debug_trace.log. Error: {e_test}. Path was: {early_trace_path_debug if early_trace_path_debug else str(installer.install_dir / 'logs' / 'setup_debug_trace.log')}")
 
-                    installer.print_step(f"Ejecutando script de inicio: {script_to_run}...", "info") # Mantener para flujo visual si no crashea antes
+                    # installer.print_step(f"Ejecutando script de inicio: {script_to_run}...", "info") # Ya no se ejecuta script_to_run
+                    installer.print_step("Iniciando servicios directamente desde setup.py...", "info")
 
-                    # try original (ahora con el logging detallado que ya teníamos)
+                    # Nuevo bloque para ejecutar la lógica de start.bat directamente
                     try:
-                        # El NUEVO LOGGING DETALLADO (que ahora usa trace_log_file_path)
-                        # La definición de trace_log_file_path se mueve aquí para que coincida con el original.
-                        trace_log_file_path = installer.install_dir / "logs" / "setup_debug_trace.log" # Esta es la misma ruta que early_trace_path_debug
-                        log_dir_for_trace = installer.install_dir / "logs"
-                        log_dir_for_trace.mkdir(exist_ok=True) # Asegurar que el directorio de logs existe para el trace log
+                        trace_log_file_path = installer.install_dir / "logs" / "setup_debug_trace.log"
+                        log_dir_for_trace = installer.install_dir / "logs" # Ya debería existir por el "isolated test"
 
                         with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] --- Iniciando intento de ejecución de start.bat ---\n")
-                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Script a ejecutar: {script_to_run.name}\n")
-                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] CWD para subprocess: {str(script_to_run.parent)}\n")
-                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Antes de llamar a subprocess.run.\n")
+                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] --- Iniciando ejecución directa de comandos (simulando start.bat) ---\n")
 
-                        process_result = None # Inicializar por si subprocess.run falla catastróficamente
-
-                        try: # Bloque try interno para la ejecución de subprocess y el logging principal
-                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Intentando lanzar start.bat con Popen y DETACHED_PROCESS/CREATE_NEW_CONSOLE.\n")
-
-                            # Usar Popen para más control sobre la creación del proceso
-                            # Intentar con la ruta completa al script
-                            full_script_path = str(script_to_run.resolve())
-                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Intentando Popen con shell=True y ruta completa: {full_script_path}.\n")
-
-                            process = subprocess.Popen(
-                                # Cuando shell=True, Popen espera una cadena para el comando si es complejo,
-                                # o una lista donde el primer elemento es el ejecutable y el resto son sus args.
-                                # Para ejecutar un .bat directamente, la ruta al .bat como cadena es lo más simple.
-                                full_script_path, # Directamente la ruta al .bat como una cadena
-                                cwd=str(script_to_run.parent),
-                                shell=True, # Establecer shell=True
-                                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_CONSOLE
-                            )
-
-                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] start.bat lanzado con Popen (shell=True, ruta completa). PID (si está disponible): {process.pid}.\n")
-                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] setup.py continuará y finalizará. Revisa si apareció una nueva ventana para start.bat.\n")
-
-                            # stdout, stderr = process.communicate(timeout=10) # Podríamos intentar un communicate con timeout
-                                                                            # pero con detached process esto podría no funcionar como se espera.
-                                                                            # Por ahora, solo lo lanzamos.
-
-                            # No podemos obtener process_result.returncode directamente de Popen sin esperar.
-                            # El objetivo aquí es ver si start.bat se ejecuta y si su ventana muestra algo.
-                            # El logging de la salida de start.bat (stdout/stderr) a setup_start_bat_output.log
-                            # probablemente no funcionará como antes con DETACHED_PROCESS si no usamos communicate().
-
-                            # Eliminamos la escritura a setup_start_bat_output.log por ahora,
-                            # ya que el foco es ver si start.bat se ejecuta visiblemente.
-                            # El log de start.bat (debug_start_bat.log y docker_compose_output.log si start.bat está modificado)
-                            # sería la fuente de información de lo que hace start.bat.
-
-                            installer.print_step(f"Script de inicio ({script_to_run.name}) invocado en una nueva ventana (esperado).", "info")
-                            installer.print_step("Revisa si apareció una nueva ventana de consola para start.bat y si muestra errores.", "warning")
-                            installer.print_step("setup.py ahora esperará 15 segundos antes de salir para dar tiempo a observar.", "info")
-                            time.sleep(15) # Dar tiempo a observar la nueva ventana
-
-                        except Exception as sub_e: # Captura error de Popen
-                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] EXCEPCIÓN durante subprocess.Popen: {sub_e}\n")
-                            installer.print_step(f"Excepción al intentar lanzar {script_to_run.name} con Popen: {sub_e}", "error")
-
-                        # El bloque finally original ya no es tan relevante aquí porque no estamos esperando a process_result
-                        # pero lo dejamos por si acaso, o lo podemos eliminar/ajustar.
-                        # Por ahora, lo comentaré para simplificar, ya que su propósito original
-                        # estaba ligado a la finalización de subprocess.run.
-                        # finally: # Finally para el try interno de subprocess
-                        #     with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                        #         trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Bloque finally del try interno de Popen (ajustado) alcanzado.\n")
-
-                    # except originales del script
-                    except subprocess.CalledProcessError as e:
+                        # 1. Verificar Docker
+                        docker_ok = False
                         with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] EXCEPCIÓN (CalledProcessError): {e}. stdout: {e.stdout}, stderr: {e.stderr}\n")
-                        installer.print_step(f"El script de inicio ({script_to_run.name}) encontró un error (CalledProcessError): {e}. stdout: {e.stdout}, stderr: {e.stderr}", "error")
-                    except FileNotFoundError:
+                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Verificando Docker...\n")
+                        docker_check_code, docker_check_output = installer.run_command("docker --version", check=False)
+                        if docker_check_code == 0:
+                            installer.print_step("Docker check OK.", "success")
+                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Docker check OK. Salida: {docker_check_output}\n")
+                            docker_ok = True
+                        else:
+                            error_msg_docker = f"Error: Docker no está instalado o no responde. Código: {docker_check_code}, Salida: {docker_check_output}"
+                            installer.print_step(error_msg_docker, "error")
+                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Docker check FAILED. {error_msg_docker}\n")
+                            # No continuar si Docker no está OK, ya que docker-compose fallará.
+                            raise Exception("Docker check failed. No se puede continuar con docker-compose.")
+
+                        # 2. Verificar/Iniciar Ollama (Simplificado)
                         with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] EXCEPCIÓN (FileNotFoundError): No se encontró {script_to_run}\n")
-                        installer.print_step(f"Error: No se encontró el script de inicio en {script_to_run}", "error")
-                    except Exception as e:
-                        # Este es el catch-all más externo para esta sección
-                        # Asegurémonos de que trace_log_file_path esté definido incluso si el error ocurre antes de su primera asignación
-                        # (aunque en este flujo, se asigna justo al entrar al 'try' original)
-                        current_time_for_log = time.strftime('%Y-%m-%d %H:%M:%S')
-                        if 'trace_log_file_path' not in locals():
-                             # Definir una ruta de emergencia si es necesario, aunque no debería ser el caso aquí.
-                             # Esto es más por robustez extrema.
-                             emergency_log_dir = Path.home() / "manus_system_emergency_logs"
-                             emergency_log_dir.mkdir(exist_ok=True)
-                             trace_log_file_path_emergency = emergency_log_dir / "setup_debug_trace_emergency.log"
-                             with open(trace_log_file_path_emergency, "a", encoding='utf-8') as trace_f_emergency:
-                                trace_f_emergency.write(f"[{current_time_for_log}] EXCEPCIÓN GENERAL (trace_log_file_path no definido): {e}\n")
-                        else: # Ruta normal del log de trace
-                             with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                                trace_f.write(f"[{current_time_for_log}] EXCEPCIÓN GENERAL en bloque de ejecución de start.bat: {e}\n")
-                        installer.print_step(f"Error inesperado al ejecutar {script_to_run.name if 'script_to_run' in locals() else 'script desconocido'}: {e}", "error")
-                else:
+                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Verificación de Ollama (informativo): Se asume que Ollama está en ejecución si es necesario para los servicios de Docker.\n")
+                        installer.print_step("INFO: Se asume que Ollama está en ejecución si es requerido por los servicios.", "info")
+
+                        # 3. Crear red Docker mcp-network
+                        with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Creando red Docker mcp-network...\n")
+                        network_create_code, network_create_output = installer.run_command("docker network create mcp-network", check=False)
+                        if network_create_code == 0:
+                            installer.print_step("Red Docker mcp-network creada.", "success")
+                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Red mcp-network creada. Salida: {network_create_output}\n")
+                        elif "already exists" in network_create_output.lower():
+                            installer.print_step("Red Docker mcp-network ya existente.", "info")
+                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Red mcp-network ya existía. Salida: {network_create_output}\n")
+                        else:
+                            installer.print_step(f"Advertencia: Error creando red Docker mcp-network. Código: {network_create_code}, Salida: {network_create_output}", "warning")
+                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Error creando red mcp-network. Código: {network_create_code}. Salida: {network_create_output}\n")
+
+                        # 4. Ejecutar docker-compose up -d
+                        dc_log_file = log_dir_for_trace / "setup_docker_compose_output.log"
+                        with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Ejecutando docker-compose up -d...\n")
+                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] CWD para docker-compose: {str(installer.install_dir)}\n")
+                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] La salida de docker-compose se guardará en: {dc_log_file}\n")
+
+                        dc_command = ['docker-compose', 'up', '-d']
+                        process_result_dc = subprocess.run(
+                            dc_command,
+                            cwd=str(installer.install_dir),
+                            capture_output=True,
+                            text=True,
+                            shell=False,
+                            check=False,
+                            encoding='utf-8',
+                            errors='replace'
+                        )
+
+                        with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] docker-compose up -d finalizado. Código de retorno: {process_result_dc.returncode}\n")
+
+                        with open(dc_log_file, "w", encoding='utf-8') as f_dc_log:
+                            f_dc_log.write(f"--- Comando: {' '.join(dc_command)} ---\n")
+                            f_dc_log.write(f"--- CWD: {str(installer.install_dir)} ---\n")
+                            f_dc_log.write("--- STDOUT ---\n")
+                            f_dc_log.write(process_result_dc.stdout if process_result_dc.stdout else "[No stdout]\n")
+                            f_dc_log.write("\n--- STDERR ---\n")
+                            f_dc_log.write(process_result_dc.stderr if process_result_dc.stderr else "[No stderr]\n")
+                            f_dc_log.write(f"\n--- Return Code: {process_result_dc.returncode} ---\n")
+
+                        with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                             trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Salida de docker-compose escrita en {dc_log_file}.\n")
+
+                        if process_result_dc.returncode == 0:
+                            installer.print_step(f"Comandos de inicio (incluyendo docker-compose) ejecutados. Verifique {dc_log_file} para detalles de docker-compose.", "success")
+                        else:
+                            installer.print_step(f"docker-compose up -d finalizó con código {process_result_dc.returncode}. Consulte {dc_log_file} para errores.", "error")
+
+                    except Exception as e_main_exec:
+                        if 'trace_log_file_path' not in locals() or trace_log_file_path is None:
+                             trace_log_file_path = installer.install_dir / "logs" / "setup_debug_trace.log"
+                        with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                            current_time_for_log = time.strftime('%Y-%m-%d %H:%M:%S')
+                            trace_f.write(f"[{current_time_for_log}] EXCEPCIÓN GENERAL durante la ejecución directa de comandos de start.bat: {e_main_exec}\n")
+                        installer.print_step(f"Error inesperado durante la ejecución de la lógica de start.bat: {e_main_exec}", "error")
+
+                else: # installer.system != "windows"
                     script_to_run = installer.install_dir / "scripts" / "start.sh"
                     installer.print_step(f"Ejecutando script de inicio: {script_to_run}...", "info")
-                    # For Linux/macOS, os.system is generally fine as it often inherits the console
-                    os.system(f'sh "{script_to_run}"') # Ensure sh is used for .sh
-        else:
-            # This message is from the ELEVATED script if run_installation() returns False
+                    os.system(f'sh "{script_to_run}"')
+        else: # run_installation() failed
             installer.print_step("La instalación falló (proceso elevado).", "error")
-            if installer.is_admin and 'log_file_path' in locals():
-                with open(log_file_path, "a", encoding="utf-8") as log_file:
-                    log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] run_installation() returned False.\n")
+            if installer.is_admin and 'log_file_path' in locals() and log_file_path is not None:
+                try:
+                    with open(log_file_path, "a", encoding="utf-8") as log_f:
+                        log_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] run_installation() returned False.\n")
+                except Exception as e:
+                    write_very_early_log(f"main(): Warning - Could not write to old elevated log {log_file_path} on run_installation failure: {e}")
             input("Presiona Enter para salir...")
             sys.exit(1)
             
     except KeyboardInterrupt:
         installer.print_step("Instalación cancelada por el usuario.", "warning")
-        if 'log_file_path' in locals() and installer.is_admin:
-             with open(log_file_path, "a", encoding="utf-8") as log_file:
-                log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Installation cancelled by user.\n")
+        if 'log_file_path' in locals() and installer.is_admin and log_file_path is not None:
+             try:
+                with open(log_file_path, "a", encoding="utf-8") as log_f:
+                    log_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Installation cancelled by user.\n")
+             except Exception as e:
+                write_very_early_log(f"main(): Warning - Could not write to old elevated log {log_file_path} on KeyboardInterrupt: {e}")
         input("Presiona Enter para salir...")
         sys.exit(1)
     except Exception as e:
         installer.print_step(f"Error inesperado: {e}", "error")
-        if 'log_file_path' in locals() and installer.is_admin: # Redundant check for log_file_path, but safe
-            with open(log_file_path, "a", encoding="utf-8") as log_file:
-                log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Unexpected error: {e}\n")
+        if 'log_file_path' in locals() and installer.is_admin and log_file_path is not None:
+            try:
+                with open(log_file_path, "a", encoding="utf-8") as log_f: # Changed variable
+                    log_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Unexpected error: {e}\n")
+            except Exception as e_log:
+                 write_very_early_log(f"main(): Warning - Could not write to old elevated log {log_file_path} on unexpected error: {e_log}")
         input("Presiona Enter para salir...")
         sys.exit(1)
-
-    # For successful completion, the input() prompt for starting the system already keeps the window open.
-    # So, we only need the explicit input() pause in the error paths above for the admin instance.
 
 if __name__ == "__main__":
     main()
