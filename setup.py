@@ -670,27 +670,27 @@ class ManusInstaller:
                     else:
                         print(f"   {Colors.FAIL}❌ Chocolatey: Fallo al instalar Node.js. Código: {return_code or 'N/A'}{Colors.ENDC}")
 
-                else: # Manual download path
+                else: # Manual download path for Windows if no winget/choco
                     command_executed = True
-                    print(f"   {Colors.OKBLUE}ℹ️ Winget/Choco no detectado. Intentando descarga manual de Node.js...{Colors.ENDC}")
-                else:
-                    # Descarga manual
-                    url = "https://nodejs.org/dist/v20.10.0/node-v20.10.0-x64.msi"
+                    print(f"   {Colors.OKBLUE}ℹ️ Winget/Choco no detectado. Intentando descarga manual de Node.js para Windows...{Colors.ENDC}")
+                    url = "https://nodejs.org/dist/v20.10.0/node-v20.10.0-x64.msi" # Ensure this is the Windows URL
                     installer_path = self.temp_dir / "nodejs-installer.msi"
                     
-                    if self.download_with_progress(url, installer_path, "Node.js"):
-                        success, stdout, stderr, return_code = self.run_command(
-                            f'msiexec /i "{installer_path}" /quiet',
-                            "Instalando Node.js (descarga manual)"
+                    if self.download_with_progress(url, installer_path, "Node.js MSI"):
+                        success_manual, stdout_manual, stderr_manual, return_code_manual = self.run_command(
+                            f'msiexec /i "{installer_path}" /quiet /norestart', # Common silent flags for MSI
+                            "Instalando Node.js (descarga manual Windows)"
                         )
-                        final_stderr = stderr
-                        if success:
+                        final_stderr = stderr_manual # Capture stderr from this path
+                        if success_manual:
                             installation_succeeded_or_skipped = True
+                            print(f"   {Colors.OKGREEN}✅ Node.js (MSI) instalado manualmente.{Colors.ENDC}")
                         else:
-                            print(f"   {Colors.FAIL}❌ Fallo en la instalación manual de Node.js. Código: {return_code or 'N/A'}{Colors.ENDC}")
+                            print(f"   {Colors.FAIL}❌ Fallo en la instalación manual de Node.js (MSI). Código: {return_code_manual or 'N/A'}{Colors.ENDC}")
+                            # Logged by run_command
                     else:
-                        self.logger.error("Fallo la descarga manual de Node.js.")
-                        # This path will lead to overall failure if installation_succeeded_or_skipped is false
+                        self.logger.error("Fallo la descarga del MSI de Node.js para Windows.")
+                        # installation_succeeded_or_skipped remains False
             
             elif system == 'darwin':  # macOS
                 command_executed = True
