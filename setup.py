@@ -1019,63 +1019,11 @@ REACT_APP_VERSION=1.0.0
         
         # Script de inicio para Windows
         windows_start = """@echo off
-echo Iniciando MANUS-like System...
-
-echo Verificando Docker...
-docker --version >nul 2>&1
-if errorlevel 1 (
-    echo Error: Docker no está instalado o no está ejecutándose
-    echo Por favor, inicia Docker Desktop
-    pause
-    exit /b 1
-)
-
-echo Verificando Ollama...
-ollama --version >nul 2>&1
-if errorlevel 1 (
-    echo Error: Ollama no está instalado
-    pause
-    exit /b 1
-)
-echo DEBUG: Checkpoint 1 - After Ollama version check
+echo Starting debug start.bat > "%~dp0debug_ultra_simple.log"
+echo Script ran. Time: %%TIME%% >> "%~dp0debug_ultra_simple.log"
+echo This is a test. Press any key to continue.
 pause
-
-echo Verificando si Ollama ya está en ejecución...
-netstat -ano | findstr /R /C:"LISTENING" | findstr ":11434" >nul
-if errorlevel 1 (
-    echo Iniciando Ollama...
-    start /B ollama serve
-    echo Esperando a que Ollama (recién iniciado) esté listo...
-    timeout /t 5 /nobreak >nul
-) else (
-    echo Ollama ya está en ejecución.
-)
-echo DEBUG: Checkpoint 2 - After Ollama start attempt/check
-pause
-
-echo Esperando a que Ollama esté listo (general)...
-timeout /t 2 /nobreak >nul
-
-echo Descargando modelo por defecto...
-ollama pull llama3.1:8b
-echo DEBUG: Checkpoint 3 - After ollama pull
-pause
-
-echo Creando red MCP...
-docker network create mcp-network 2>nul
-
-echo Iniciando servicios...
-docker-compose up -d
-echo DEBUG: Checkpoint 4 - After docker-compose up
-pause
-
-echo Sistema iniciado correctamente!
-echo Frontend: http://localhost:3000
-echo Backend API: http://localhost:5000
-echo.
-echo Presiona cualquier tecla para abrir el navegador...
-pause
-start http://localhost:3000
+echo Exiting debug start.bat >> "%~dp0debug_ultra_simple.log"
 """
         
         # Script de inicio para Linux/macOS
@@ -1475,8 +1423,8 @@ def main():
                 script_to_run = ""
                 if installer.system == "windows":
                     script_to_run = installer.install_dir / "scripts" / "start.bat"
-                    # Use subprocess.call to run in the same window, allowing pauses to work
-                    subprocess.call(str(script_to_run), shell=True)
+                    # Explicitly use cmd.exe and set working directory
+                    subprocess.call(['cmd', '/c', script_to_run.name], cwd=str(script_to_run.parent))
                 else:
                     script_to_run = installer.install_dir / "scripts" / "start.sh"
                     # For Linux/macOS, os.system is generally fine as it often inherits the console
@@ -1512,4 +1460,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
