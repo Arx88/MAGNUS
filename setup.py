@@ -1037,6 +1037,8 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+echo DEBUG: Checkpoint 1 - After Ollama version check
+pause
 
 echo Verificando si Ollama ya está en ejecución...
 netstat -ano | findstr /R /C:"LISTENING" | findstr ":11434" >nul
@@ -1048,25 +1050,31 @@ if errorlevel 1 (
 ) else (
     echo Ollama ya está en ejecución.
 )
+echo DEBUG: Checkpoint 2 - After Ollama start attempt/check
+pause
 
 echo Esperando a que Ollama esté listo (general)...
 timeout /t 2 /nobreak >nul
 
 echo Descargando modelo por defecto...
 ollama pull llama3.1:8b
+echo DEBUG: Checkpoint 3 - After ollama pull
+pause
 
 echo Creando red MCP...
 docker network create mcp-network 2>nul
 
 echo Iniciando servicios...
 docker-compose up -d
+echo DEBUG: Checkpoint 4 - After docker-compose up
+pause
 
 echo Sistema iniciado correctamente!
 echo Frontend: http://localhost:3000
 echo Backend API: http://localhost:5000
 echo.
 echo Presiona cualquier tecla para abrir el navegador...
-pause >nul
+pause
 start http://localhost:3000
 """
         
@@ -1464,10 +1472,17 @@ def main():
                     log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Installation successful.\n")
             
             if input("\n¿Deseas iniciar el sistema ahora? (s/n): ").lower() in ['s', 'y', 'yes', 'sí']:
+                script_to_run = ""
                 if installer.system == "windows":
-                    os.system(f'"{installer.install_dir / "scripts" / "start.bat"}"')
+                    script_to_run = installer.install_dir / "scripts" / "start.bat"
+                    # Use subprocess.call to run in the same window, allowing pauses to work
+                    subprocess.call(str(script_to_run), shell=True)
                 else:
-                    os.system(f'"{installer.install_dir / "scripts" / "start.sh"}"')
+                    script_to_run = installer.install_dir / "scripts" / "start.sh"
+                    # For Linux/macOS, os.system is generally fine as it often inherits the console
+                    # but subprocess.call can also be used for consistency if needed.
+                    # For now, keeping os.system for non-Windows as it was not reported as problematic.
+                    os.system(f'sh "{script_to_run}"') # Ensure sh is used for .sh
         else:
             # This message is from the ELEVATED script if run_installation() returns False
             installer.print_step("La instalación falló (proceso elevado).", "error")
