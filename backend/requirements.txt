@@ -1,0 +1,2 @@
+# Placeholder for backend Python dependencies
+Flask>=2.0.0
