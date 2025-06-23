@@ -1038,11 +1038,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Iniciando Ollama...
-start /B ollama serve
+echo Verificando si Ollama ya está en ejecución...
+netstat -ano | findstr /R /C:"LISTENING" | findstr ":11434" >nul
+if errorlevel 1 (
+    echo Iniciando Ollama...
+    start /B ollama serve
+    echo Esperando a que Ollama (recién iniciado) esté listo...
+    timeout /t 5 /nobreak >nul
+) else (
+    echo Ollama ya está en ejecución.
+)
 
-echo Esperando a que Ollama esté listo...
-timeout /t 5 /nobreak >nul
+echo Esperando a que Ollama esté listo (general)...
+timeout /t 2 /nobreak >nul
 
 echo Descargando modelo por defecto...
 ollama pull llama3.1:8b
