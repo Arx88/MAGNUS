@@ -1197,7 +1197,16 @@ echo "Sistema detenido."
     def setup_database(self) -> bool:
         """Configura la base de datos"""
         self.print_step("Configurando base de datos...")
-        
+
+        # --- BEGIN MODIFICATION ---
+        # Ensure any previous setup container is removed to prevent conflicts
+        self.print_step("Verificando y limpiando contenedores de setup previos...", "info")
+        # These commands are allowed to fail if the container doesn't exist, hence check=False
+        self.run_command("docker stop manus-postgres-setup", check=False)
+        self.run_command("docker rm manus-postgres-setup", check=False)
+        self.print_step("Limpieza de contenedores de setup completada.", "info")
+        # --- END MODIFICATION ---
+
         # Start PostgreSQL with Docker for setup
         # Using check=True as these Docker operations are critical for DB setup.
         pg_setup_cmd = "docker run -d --name manus-postgres-setup -e POSTGRES_DB=manus_db -e POSTGRES_USER=manus_user -e POSTGRES_PASSWORD=manus_password_2024 -p 5432:5432 postgres:15"
