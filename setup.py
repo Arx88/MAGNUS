@@ -397,18 +397,18 @@ class ManusInstaller:
             else:
                 self.logger.error(log_message) # stderr is now part of the structured log
             
-            return success, stdout, stderr
+            return success, stdout, stderr, return_code
             
         except subprocess.TimeoutExpired:
             if process: process.kill()
             error_msg = f"Comando excedió timeout de {timeout}s"
             self.logger.error(f"{error_msg}: {command}")
-            return False, "", error_msg
+            return False, "", error_msg, None # No return code available
             
         except Exception as e:
             error_msg = f"Error ejecutando comando: {str(e)}"
             self.logger.error(f"{error_msg}: {command}")
-            return False, "", error_msg
+            return False, "", error_msg, None # No return code available
     
     def download_with_progress(self, url: str, destination: Path, description: str = "") -> bool:
         """Descarga archivo con barra de progreso"""
@@ -617,102 +617,200 @@ class ManusInstaller:
         system = self.system_info['system']
         package_manager = self.system_info['package_manager']
         
+        WINGET_NODE_ALREADY_INSTALLED_CODE = 2316632107 # From user log
+
+        node_installed, _, _ = self.dep_checker.check_dependency('node')
+        npm_installed, _, _ = self.dep_checker.check_dependency('npm')
+
+        if node_installed and npm_installed:
+            print(f"   {Colors.OKGREEN}✅ Node.js y npm ya están instalados.{Colors.ENDC}")
+            return True
+
+        command_executed = False
+        installation_succeeded_or_skipped = False
+        final_stderr = ""
+
         try:
             if system == 'windows':
                 if package_manager == 'winget':
-                    success, _, stderr = self.run_command(
+                    command_executed = True
+                    # Always run winget if npm is missing, or if node is missing.
+                    # If node is present but npm is not, winget *should* repair this.
+                    print(f"   {Colors.OKBLUE}ℹ️ Intentando instalar/actualizar Node.js y npm con winget...{Colors.ENDC}")
+                    success, stdout, stderr, return_code = self.run_command(
                         "winget install OpenJS.NodeJS --accept-package-agreements --accept-source-agreements",
-                        "Instalando Node.js"
+                        "Instalando/Actualizando Node.js (OpenJS) con winget"
                     )
+                    final_stderr = stderr
+                    if success:
+                        installation_succeeded_or_skipped = True
+                        print(f"   {Colors.OKGREEN}✅ Winget: Comando para OpenJS.NodeJS ejecutado exitosamente.{Colors.ENDC}")
+                    elif return_code == WINGET_NODE_ALREADY_INSTALLED_CODE:
+                        installation_succeeded_or_skipped = True
+                        print(f"   {Colors.OKBLUE}ℹ️ Winget: OpenJS.NodeJS ya está instalado y actualizado (código: {return_code}).{Colors.ENDC}")
+                    else:
+                        # Genuine error
+                        print(f"   {Colors.FAIL}❌ Winget: Fallo al instalar OpenJS.NodeJS. Código: {return_code or 'N/A'}{Colors.ENDC}")
+                        # stderr is already logged by run_command
+
                 elif package_manager == 'choco':
-                    success, _, stderr = self.run_command(
-                        "choco install nodejs -y",
-                        "Instalando Node.js con Chocolatey"
+                    command_executed = True
+                    print(f"   {Colors.OKBLUE}ℹ️ Intentando instalar/actualizar Node.js y npm con Chocolatey...{Colors.ENDC}")
+                    success, stdout, stderr, return_code = self.run_command(
+                        "choco install nodejs -y", # nodejs package on choco usually includes npm
+                        "Instalando/Actualizando Node.js con Chocolatey"
                     )
+                    final_stderr = stderr
+                    if success:
+                        installation_succeeded_or_skipped = True
+                        print(f"   {Colors.OKGREEN}✅ Chocolatey: Comando para Node.js ejecutado exitosamente.{Colors.ENDC}")
+                    elif "already installed" in (stdout + stderr).lower(): # Choco's way of saying it's there
+                        installation_succeeded_or_skipped = True
+                        print(f"   {Colors.OKBLUE}ℹ️ Chocolatey: Node.js ya está instalado.{Colors.ENDC}")
+                    else:
+                        print(f"   {Colors.FAIL}❌ Chocolatey: Fallo al instalar Node.js. Código: {return_code or 'N/A'}{Colors.ENDC}")
+
+                else: # Manual download path
+                    command_executed = True
+                    print(f"   {Colors.OKBLUE}ℹ️ Winget/Choco no detectado. Intentando descarga manual de Node.js...{Colors.ENDC}")
                 else:
                     # Descarga manual
                     url = "https://nodejs.org/dist/v20.10.0/node-v20.10.0-x64.msi"
                     installer_path = self.temp_dir / "nodejs-installer.msi"
                     
                     if self.download_with_progress(url, installer_path, "Node.js"):
-                        success, _, stderr = self.run_command(
+                        success, stdout, stderr, return_code = self.run_command(
                             f'msiexec /i "{installer_path}" /quiet',
-                            "Instalando Node.js"
+                            "Instalando Node.js (descarga manual)"
                         )
+                        final_stderr = stderr
+                        if success:
+                            installation_succeeded_or_skipped = True
+                        else:
+                            print(f"   {Colors.FAIL}❌ Fallo en la instalación manual de Node.js. Código: {return_code or 'N/A'}{Colors.ENDC}")
                     else:
-                        return False
+                        self.logger.error("Fallo la descarga manual de Node.js.")
+                        # This path will lead to overall failure if installation_succeeded_or_skipped is false
             
             elif system == 'darwin':  # macOS
+                command_executed = True
+                # Assuming node_installed and npm_installed checks at the start are sufficient for macOS too.
                 if package_manager == 'brew':
-                    success, _, stderr = self.run_command(
-                        "brew install node",
-                        "Instalando Node.js con Homebrew"
+                    success, stdout, stderr, return_code = self.run_command(
+                        "brew install node", # Installs node and npm
+                        "Instalando Node.js y npm con Homebrew"
                     )
+                    final_stderr = stderr
+                    if success:
+                        installation_succeeded_or_skipped = True
+                    # Brew usually exits 0 if already installed, or if successfully upgraded.
+                    # If it fails for other reasons, it's a genuine error.
+                    elif not success : # Genuine error
+                         print(f"   {Colors.FAIL}❌ Homebrew: Fallo al instalar Node.js. Código: {return_code or 'N/A'}{Colors.ENDC}")
                 else:
                     # Descarga manual para macOS
                     url = "https://nodejs.org/dist/v20.10.0/node-v20.10.0.pkg"
                     installer_path = self.temp_dir / "nodejs.pkg"
                     
                     if self.download_with_progress(url, installer_path, "Node.js"):
-                        success, _, stderr = self.run_command(
-                            f"installer -pkg {installer_path} -target /",
-                            "Instalando Node.js"
+                        success, stdout, stderr, return_code = self.run_command(
+                            f"installer -pkg {installer_path} -target /", # Installs node and npm
+                            "Instalando Node.js y npm (descarga manual macOS)"
                         )
+                        final_stderr = stderr
+                        if success:
+                            installation_succeeded_or_skipped = True
+                        else:
+                            print(f"   {Colors.FAIL}❌ Fallo en la instalación manual de Node.js en macOS. Código: {return_code or 'N/A'}{Colors.ENDC}")
                     else:
-                        return False
+                        self.logger.error("Fallo la descarga manual de Node.js para macOS.")
+
             
             else:  # Linux
+                command_executed = True
+                # For Linux, package managers usually handle "already installed" gracefully (exit code 0)
+                # or update if a new version is found.
+                # The commands below typically install both node and npm.
                 if package_manager == 'apt':
-                    # Usar NodeSource repository
+                    print(f"   {Colors.OKBLUE}ℹ️ Intentando instalar/actualizar Node.js y npm con apt...{Colors.ENDC}")
                     commands = [
-                        "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -",
-                        "apt-get install -y nodejs"
+                        "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -", # Setup script for specific version
+                        "apt-get install -y nodejs" # Installs nodejs and usually npm
                     ]
-                    
-                    for cmd in commands:
-                        success, _, stderr = self.run_command(cmd, f"Ejecutando: {cmd}")
+                    current_success = True
+                    for cmd_idx, cmd_val in enumerate(commands):
+                        success, stdout, stderr, return_code = self.run_command(cmd_val, f"Ejecutando: {cmd_val}")
+                        final_stderr += f"\nCmd {cmd_idx} stderr: {stderr}"
                         if not success:
+                            current_success = False
+                            print(f"   {Colors.FAIL}❌ Fallo el comando apt: {cmd_val}. Código: {return_code or 'N/A'}{Colors.ENDC}")
                             break
+                    if current_success: installation_succeeded_or_skipped = True
                 
                 elif package_manager in ['yum', 'dnf']:
-                    # Usar NodeSource repository para RHEL/CentOS
+                    print(f"   {Colors.OKBLUE}ℹ️ Intentando instalar/actualizar Node.js y npm con {package_manager}...{Colors.ENDC}")
                     commands = [
                         "curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -",
-                        f"{package_manager} install -y nodejs"
+                        f"{package_manager} install -y nodejs" # Installs nodejs and usually npm
                     ]
-                    
-                    for cmd in commands:
-                        success, _, stderr = self.run_command(cmd, f"Ejecutando: {cmd}")
+                    current_success = True
+                    for cmd_idx, cmd_val in enumerate(commands):
+                        success, stdout, stderr, return_code = self.run_command(cmd_val, f"Ejecutando: {cmd_val}")
+                        final_stderr += f"\nCmd {cmd_idx} stderr: {stderr}"
                         if not success:
+                            current_success = False
+                            print(f"   {Colors.FAIL}❌ Fallo el comando {package_manager}: {cmd_val}. Código: {return_code or 'N/A'}{Colors.ENDC}")
                             break
+                    if current_success: installation_succeeded_or_skipped = True
                 
                 elif package_manager == 'pacman':
-                    success, _, stderr = self.run_command(
-                        "pacman -S nodejs npm --noconfirm",
-                        "Instalando Node.js con pacman"
+                    print(f"   {Colors.OKBLUE}ℹ️ Intentando instalar/actualizar Node.js y npm con pacman...{Colors.ENDC}")
+                    success, stdout, stderr, return_code = self.run_command(
+                        "pacman -S nodejs npm --noconfirm", # Explicitly installs both
+                        "Instalando Node.js y npm con pacman"
                     )
+                    final_stderr = stderr
+                    if success: installation_succeeded_or_skipped = True
+                    else: print(f"   {Colors.FAIL}❌ Pacman: Fallo al instalar Node.js/npm. Código: {return_code or 'N/A'}{Colors.ENDC}")
                 else:
-                    self.logger.error(f"Gestor de paquetes no soportado: {package_manager}")
-                    return False
+                    self.logger.error(f"Gestor de paquetes Linux no soportado para Node.js: {package_manager}")
+                    # This path will lead to overall failure if installation_succeeded_or_skipped is false
             
-            if success:
-                print(f"   {Colors.OKGREEN}✅ Node.js instalado correctamente{Colors.ENDC}")
-                
-                # Verificar instalación
-                success, _, _ = self.run_command("node --version", timeout=10)
-                if success:
-                    print(f"   {Colors.OKGREEN}✅ Node.js verificado y funcionando{Colors.ENDC}")
+            if not command_executed and not (node_installed and npm_installed):
+                 # This case should ideally not be reached if there's a package manager or manual download option.
+                self.logger.error("No se ejecutó ningún comando de instalación para Node.js y no estaba preinstalado.")
+                installation_succeeded_or_skipped = False
+
+
+            # Post-installation verification for Node and especially NPM
+            if installation_succeeded_or_skipped:
+                self.logger.info("Verificando Node.js y npm después del intento de instalación/actualización.")
+                node_installed_after, _, _ = self.dep_checker.check_dependency('node')
+                npm_installed_after, _, _ = self.dep_checker.check_dependency('npm')
+
+                if node_installed_after and npm_installed_after:
+                    print(f"   {Colors.OKGREEN}✅ Node.js y npm verificados y funcionando.{Colors.ENDC}")
                     return True
-                else:
-                    print(f"   {Colors.WARNING}⚠️  Node.js instalado pero no responde{Colors.ENDC}")
+                elif node_installed_after and not npm_installed_after:
+                    print(f"   {Colors.FAIL}❌ Node.js está instalado, pero npm sigue sin encontrarse después de la instalación/actualización.{Colors.ENDC}")
+                    self.logger.error("npm no encontrado después de la instalación de Node.js.")
+                    return False
+                elif not node_installed_after: # Should not happen if installation_succeeded_or_skipped is true unless dep_checker is inconsistent
+                    print(f"   {Colors.FAIL}❌ Node.js no se encuentra después del intento de instalación/actualización.{Colors.ENDC}")
+                    self.logger.error("Node.js no encontrado después de un supuesto éxito de instalación/actualización.")
+                    return False
+                else: # Should not be reached
                     return False
             else:
-                print(f"   {Colors.FAIL}❌ Error instalando Node.js: {stderr}{Colors.ENDC}")
+                # Installation attempt failed genuinely
+                print(f"   {Colors.FAIL}❌ Error en la instalación de Node.js/npm.{Colors.ENDC}")
+                if final_stderr:
+                     print(f"      {Colors.FAIL}Detalles del error: {final_stderr.strip()}{Colors.ENDC}")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"Error en instalación de Node.js: {e}")
-            print(f"   {Colors.FAIL}❌ Error inesperado: {e}{Colors.ENDC}")
+            self.logger.error(f"Excepción durante la instalación de Node.js: {e}")
+            print(f"   {Colors.FAIL}❌ Error inesperado durante la instalación de Node.js: {e}{Colors.ENDC}")
             return False
     
     def install_ollama(self) -> bool:
