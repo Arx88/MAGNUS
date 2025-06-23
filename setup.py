@@ -1481,42 +1481,94 @@ def main():
                     # So, simply calling the bat file with 'cmd /c' should be sufficient if the console is already the elevated one.
                     # Using 'start /B' here for the .bat might be redundant or even counterproductive if not handled carefully.
                     # Let's ensure the CWD is correct.
+                    # try original
                     try:
-                        # MODIFICACIÓN: Capturar salida de start.bat
-                        process_result = subprocess.run(
-                            ['cmd', '/c', script_to_run.name],
-                            cwd=str(script_to_run.parent),
-                            check=False,  # No lanzar excepción inmediatamente
-                            shell=False,
-                            capture_output=True, # Capturar stdout/stderr
-                            text=True, # Decodificar salida como texto
-                            encoding='utf-8', # Especificar encoding
-                            errors='replace' # Reemplazar caracteres problemáticos
-                        )
+                        # NUEVO LOGGING DETALLADO
+                        trace_log_file_path = installer.install_dir / "logs" / "setup_debug_trace.log"
+                        log_dir_for_trace = installer.install_dir / "logs"
+                        log_dir_for_trace.mkdir(exist_ok=True) # Asegurar que el directorio de logs existe para el trace log
 
-                        # Guardar salida en un log
-                        log_dir = installer.install_dir / "logs"
-                        log_dir.mkdir(exist_ok=True) # Asegurar que el directorio de logs existe
-                        output_log_file = log_dir / "setup_start_bat_output.log"
+                        with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] --- Iniciando intento de ejecución de start.bat ---\n")
+                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Script a ejecutar: {script_to_run.name}\n")
+                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] CWD para subprocess: {str(script_to_run.parent)}\n")
+                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Antes de llamar a subprocess.run.\n")
 
-                        with open(output_log_file, "w", encoding='utf-8') as f_log:
-                            f_log.write("--- STDOUT ---\n")
-                            f_log.write(process_result.stdout if process_result.stdout else "[No stdout]\n")
-                            f_log.write("\n--- STDERR ---\n")
-                            f_log.write(process_result.stderr if process_result.stderr else "[No stderr]\n")
-                            f_log.write(f"\n--- Return Code: {process_result.returncode} ---\n")
+                        process_result = None # Inicializar por si subprocess.run falla catastróficamente
 
-                        if process_result.returncode == 0:
-                            installer.print_step(f"Script de inicio invocado. Salida registrada en {output_log_file}", "success")
-                        else:
-                            installer.print_step(f"El script de inicio ({script_to_run.name}) finalizó con código {process_result.returncode}. Salida registrada en {output_log_file}", "error")
+                        try: # Bloque try interno para la ejecución de subprocess y el logging principal
+                            process_result = subprocess.run(
+                                ['cmd', '/c', script_to_run.name],
+                                cwd=str(script_to_run.parent),
+                                check=False,
+                                shell=False,
+                                capture_output=True,
+                                text=True,
+                                encoding='utf-8',
+                                errors='replace'
+                            )
 
-                    except subprocess.CalledProcessError as e: # Esto no debería ocurrir con check=False
+                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Después de llamar a subprocess.run.\n")
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Return code de start.bat: {process_result.returncode if process_result else 'N/A'}\n")
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Intentando escribir setup_start_bat_output.log.\n")
+
+                            # Guardar salida en un log (el que ya teníamos)
+                            output_log_file = log_dir_for_trace / "setup_start_bat_output.log"
+
+                            with open(output_log_file, "w", encoding='utf-8') as f_log:
+                                f_log.write("--- STDOUT ---\n")
+                                f_log.write(process_result.stdout if process_result and process_result.stdout else "[No stdout]\n")
+                                f_log.write("\n--- STDERR ---\n")
+                                f_log.write(process_result.stderr if process_result and process_result.stderr else "[No stderr]\n")
+                                f_log.write(f"\n--- Return Code: {process_result.returncode if process_result else 'N/A'} ---\n")
+
+                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Escritura de setup_start_bat_output.log completada.\n")
+
+                            if process_result and process_result.returncode == 0:
+                                installer.print_step(f"Script de inicio invocado. Salida registrada en {output_log_file}", "success")
+                            else:
+                                installer.print_step(f"El script de inicio ({script_to_run.name}) finalizó con código {process_result.returncode if process_result else 'N/A'}. Salida registrada en {output_log_file}", "error")
+
+                        except Exception as sub_e: # Captura error de subprocess.run o del logging principal
+                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] EXCEPCIÓN durante subprocess.run o logging principal: {sub_e}\n")
+                            installer.print_step(f"Excepción al ejecutar/registrar {script_to_run.name}: {sub_e}", "error")
+                            # Re-lanzar para que el try...except externo lo maneje si es necesario, o manejarlo aquí.
+                            # Por ahora, lo registramos y dejamos que el flujo continúe si es posible,
+                            # o que el error original de subprocess.run (si es el caso) se propague.
+
+                        finally: # Finally para el try interno de subprocess
+                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Bloque finally del try interno de subprocess alcanzado.\n")
+
+                    # except originales del script
+                    except subprocess.CalledProcessError as e:
+                        with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] EXCEPCIÓN (CalledProcessError): {e}. stdout: {e.stdout}, stderr: {e.stderr}\n")
                         installer.print_step(f"El script de inicio ({script_to_run.name}) encontró un error (CalledProcessError): {e}. stdout: {e.stdout}, stderr: {e.stderr}", "error")
                     except FileNotFoundError:
+                        with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                            trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] EXCEPCIÓN (FileNotFoundError): No se encontró {script_to_run}\n")
                         installer.print_step(f"Error: No se encontró el script de inicio en {script_to_run}", "error")
-                    except Exception as e: # Captura general para otros errores
-                        installer.print_step(f"Error inesperado al ejecutar {script_to_run.name}: {e}", "error")
+                    except Exception as e:
+                        # Este es el catch-all más externo para esta sección
+                        # Asegurémonos de que trace_log_file_path esté definido incluso si el error ocurre antes de su primera asignación
+                        # (aunque en este flujo, se asigna justo al entrar al 'try' original)
+                        current_time_for_log = time.strftime('%Y-%m-%d %H:%M:%S')
+                        if 'trace_log_file_path' not in locals():
+                             # Definir una ruta de emergencia si es necesario, aunque no debería ser el caso aquí.
+                             # Esto es más por robustez extrema.
+                             emergency_log_dir = Path.home() / "manus_system_emergency_logs"
+                             emergency_log_dir.mkdir(exist_ok=True)
+                             trace_log_file_path_emergency = emergency_log_dir / "setup_debug_trace_emergency.log"
+                             with open(trace_log_file_path_emergency, "a", encoding='utf-8') as trace_f_emergency:
+                                trace_f_emergency.write(f"[{current_time_for_log}] EXCEPCIÓN GENERAL (trace_log_file_path no definido): {e}\n")
+                        else: # Ruta normal del log de trace
+                             with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                                trace_f.write(f"[{current_time_for_log}] EXCEPCIÓN GENERAL en bloque de ejecución de start.bat: {e}\n")
+                        installer.print_step(f"Error inesperado al ejecutar {script_to_run.name if 'script_to_run' in locals() else 'script desconocido'}: {e}", "error")
                 else:
                     script_to_run = installer.install_dir / "scripts" / "start.sh"
                     installer.print_step(f"Ejecutando script de inicio: {script_to_run}...", "info")
