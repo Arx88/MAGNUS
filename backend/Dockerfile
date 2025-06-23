@@ -14,7 +14,7 @@ COPY requirements.txt .
 # Instalar dependencias Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar cÃ³digo fuente
+# Copiar código fuente
 COPY . .
 
 # Exponer puerto

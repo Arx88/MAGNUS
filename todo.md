@@ -49,7 +49,8 @@
 - [x] Añadir archivo de licencia MIT.o.
 
 ### Fase 9: Entrega de resultados al usuario
-- [ ] Compilar todos los documentos y archivos.
-- [ ] Presentar el diseño y la documentación al usuario.
+- [x] Compilar todos los documentos y archivos.
+- [x] Crear paquete ZIP completo del sistema.
+- [x] Presentar el diseño y la documentación al usuario.
 
 
