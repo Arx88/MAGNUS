@@ -1565,16 +1565,14 @@ def main():
                                 ['cmd', '/c', script_to_run.name],
                                 cwd=str(script_to_run.parent),
                                 shell=False, # shell=False es más seguro con listas de argumentos
-                                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_CONSOLE,
-                                stdout=subprocess.PIPE, # Aunque sea detached, podemos intentar capturar si es posible
-                                stderr=subprocess.PIPE,
-                                text=True,
-                                encoding='utf-8',
-                                errors='replace'
+                                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_CONSOLE
+                                # stdout, stderr, text, encoding, errors eliminados para simplificar la llamada con DETACHED_PROCESS
+                                # y evitar WinError 87. La salida de start.bat se revisará por sus propios logs
+                                # o por la ventana de consola que se abra.
                             )
 
                             with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] start.bat lanzado con Popen. PID (si está disponible): {process.pid}.\n")
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] start.bat lanzado con Popen (sin captura de stdout/stderr directa). PID (si está disponible): {process.pid}.\n")
                                 trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] setup.py continuará y finalizará. Revisa si apareció una nueva ventana para start.bat.\n")
 
                             # stdout, stderr = process.communicate(timeout=10) # Podríamos intentar un communicate con timeout
