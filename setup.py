@@ -440,7 +440,7 @@ class ManusInstaller:
         print()
         return True
     
-    def run_command(self, command: str, description: str = "", timeout: int = 300) -> Tuple[bool, str, str]:
+    def run_command(self, command: str, description: str = "", timeout: int = 300) -> Tuple[bool, str, str, Optional[int]]:
         """Ejecuta comando con timeout y logging"""
         self.logger.debug(f"Ejecutando: {command}")
         
@@ -941,8 +941,31 @@ class ManusInstaller:
     def install_ollama(self) -> bool:
         """Instala Ollama según el sistema operativo"""
         print(f"{Colors.OKBLUE}🧠 Instalando Ollama...{Colors.ENDC}")
+
+        # 1. Pre-check if Ollama is already installed
+        print(f"   {Colors.OKBLUE}ℹ️ Verificando si Ollama ya está instalado...{Colors.ENDC}")
+        pre_check_success, pre_check_stdout, pre_check_stderr, _ = self.run_command("ollama --version", "Verificación previa de Ollama", timeout=20)
         
+        if pre_check_success:
+            ollama_version = self._extract_version(pre_check_stdout)
+            if ollama_version != "unknown" and ollama_version.strip():
+                print(f"   {Colors.OKGREEN}✅ Ollama ya está instalado y funcionando. Versión: {ollama_version}{Colors.ENDC}")
+                self.logger.info(f"Ollama ya instalado (versión {ollama_version}). Saltando instalación.")
+                return True
+            else:
+                # Command succeeded but version couldn't be extracted. Might be an issue.
+                print(f"   {Colors.WARNING}⚠️  'ollama --version' se ejecutó pero no se pudo determinar la versión. Se procederá con el intento de instalación.{Colors.ENDC}")
+                self.logger.warning(f"'ollama --version' (pre-check) exitoso pero no se extrajo versión. Stdout: {pre_check_stdout}")
+        else:
+            print(f"   {Colors.OKBLUE}ℹ️ Ollama no detectado o no responde. Se procederá con la instalación.{Colors.ENDC}")
+            if pre_check_stderr:
+                 self.logger.debug(f"Pre-check 'ollama --version' falló. Stderr: {pre_check_stderr.strip()}")
+
         system = self.system_info['system']
+        inst_success = False # Ensure this is defined before the main try block in case download fails early for Windows
+        inst_stdout = ""
+        inst_stderr = ""
+        inst_rc = None
         
         try:
             if system == 'windows':
@@ -951,58 +974,79 @@ class ManusInstaller:
                 installer_path = self.temp_dir / "ollama-installer.exe"
                 
                 if self.download_with_progress(url, installer_path, "Ollama"):
-                    success, _, stderr = self.run_command(
+                    # Correctly unpack 4 values
+                    inst_success, inst_stdout, inst_stderr, inst_rc = self.run_command(
                         f'"{installer_path}" /S',
-                        "Instalando Ollama"
+                        "Instalando Ollama (Windows)"
                     )
-                else:
-                    return False
+                else: # Download failed
+                    self.logger.error("Fallo la descarga del instalador de Ollama para Windows.")
+                    return False # Explicitly return False if download fails
             
             elif system == 'darwin':  # macOS
-                # Usar Homebrew si está disponible
                 if self.system_info['package_manager'] == 'brew':
-                    success, _, stderr = self.run_command(
+                    # Correctly unpack 4 values
+                    inst_success, inst_stdout, inst_stderr, inst_rc = self.run_command(
                         "brew install ollama",
                         "Instalando Ollama con Homebrew"
                     )
-                else:
-                    # Script de instalación oficial
-                    success, _, stderr = self.run_command(
+                else: # Manual script for macOS
+                    # Correctly unpack 4 values
+                    inst_success, inst_stdout, inst_stderr, inst_rc = self.run_command(
                         "curl -fsSL https://ollama.ai/install.sh | sh",
-                        "Instalando Ollama con script oficial"
+                        "Instalando Ollama con script oficial (macOS)"
                     )
             
-            else:  # Linux
-                # Script de instalación oficial
-                success, _, stderr = self.run_command(
+            else:  # Assume Linux for other cases
+                # Correctly unpack 4 values
+                inst_success, inst_stdout, inst_stderr, inst_rc = self.run_command(
                     "curl -fsSL https://ollama.ai/install.sh | sh",
-                    "Instalando Ollama con script oficial"
+                    "Instalando Ollama con script oficial (Linux)"
                 )
                 
-                if success and system == 'linux':
-                    # Configurar servicio en Linux
+                if inst_success and system == 'linux':
+                    # Best effort to enable/start service, ignore results for now
                     self.run_command("systemctl enable ollama", timeout=30)
                     self.run_command("systemctl start ollama", timeout=30)
             
-            if success:
-                print(f"   {Colors.OKGREEN}✅ Ollama instalado correctamente{Colors.ENDC}")
+            # Check if the installation command was successful
+            if inst_success:
+                print(f"   {Colors.OKGREEN}✅ Comando de instalación de Ollama ejecutado correctamente.{Colors.ENDC}")
                 
-                # Verificar instalación
-                time.sleep(3)
-                success, _, _ = self.run_command("ollama --version", timeout=10)
-                if success:
-                    print(f"   {Colors.OKGREEN}✅ Ollama verificado y funcionando{Colors.ENDC}")
+                # Verification step
+                print(f"   {Colors.OKBLUE}ℹ️ Verificando instalación de Ollama ejecutando 'ollama --version'...{Colors.ENDC}")
+                time.sleep(3) # Give it a moment if it was just installed
+                # Correctly unpack 4 values for verification
+                verify_success, verify_stdout, verify_stderr, _ = self.run_command("ollama --version", timeout=20)
+
+                if verify_success:
+                    ollama_version = self._extract_version(verify_stdout)
+                    print(f"   {Colors.OKGREEN}✅ Ollama verificado y funcionando. Versión: {ollama_version}{Colors.ENDC}")
                     return True
                 else:
-                    print(f"   {Colors.WARNING}⚠️  Ollama instalado pero no responde{Colors.ENDC}")
-                    return False
+                    print(f"   {Colors.WARNING}⚠️  Ollama parece instalado (comando de instalación exitoso), pero 'ollama --version' falló o no respondió.{Colors.ENDC}")
+                    self.logger.warning(f"Comando 'ollama --version' falló después de la instalación. stdout: {verify_stdout}, stderr: {verify_stderr}")
+                    print(f"   {Colors.WARNING}   Puede que necesite iniciar Ollama manualmente o que haya un problema con la instalación.{Colors.ENDC}")
+                    # Return True because the install command itself reported success.
+                    # User might need to manually start Ollama service or troubleshoot.
+                    return True
             else:
-                print(f"   {Colors.FAIL}❌ Error instalando Ollama: {stderr}{Colors.ENDC}")
+                # Installation command itself failed
+                self.logger.error(f"Fallo el comando de instalación de Ollama. RC: {inst_rc}. Stderr: {inst_stderr}. Stdout: {inst_stdout}")
+                print(f"   {Colors.FAIL}❌ Error durante el comando de instalación de Ollama.{Colors.ENDC}")
+
+                # Specific check for Windows incompatibility error
+                if system == 'windows' and inst_stderr and "no es compatible con la versi¢n de Windows" in inst_stderr:
+                    print(f"      {Colors.FAIL}Detalles del error: {inst_stderr.strip()}{Colors.ENDC}")
+                    print(f"   {Colors.FAIL}   El instalador de Ollama descargado no es compatible con su versión de Windows.{Colors.ENDC}")
+                    print(f"   {Colors.FAIL}   Por favor, verifique los requisitos del sistema para Ollama o intente descargar manualmente una versión compatible desde el sitio web de Ollama.{Colors.ENDC}")
+                elif inst_stderr: # Generic error message if stderr is present
+                    print(f"      {Colors.FAIL}Detalles del error: {inst_stderr.strip()}{Colors.ENDC}")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"Error en instalación de Ollama: {e}")
-            print(f"   {Colors.FAIL}❌ Error inesperado: {e}{Colors.ENDC}")
+            self.logger.error(f"Excepción inesperada durante la instalación de Ollama: {str(e)}") # Log the string representation of e
+            print(f"   {Colors.FAIL}❌ Error inesperado durante la instalación de Ollama: {e}{Colors.ENDC}")
             return False
     
     def setup_project_structure(self) -> bool:
