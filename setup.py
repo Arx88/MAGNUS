@@ -784,7 +784,7 @@ class ManusInstaller:
 
             # Post-installation verification for Node and especially NPM
             if installation_succeeded_or_skipped:
-                self.logger.info("Verificando Node.js y npm después del intento de instalación/actualización.")
+                self.logger.info("Verificando Node.js y npm después del intento de instalación/actualización inicial.")
                 node_installed_after, _, _ = self.dep_checker.check_dependency('node')
                 npm_installed_after, _, _ = self.dep_checker.check_dependency('npm')
 
@@ -792,21 +792,61 @@ class ManusInstaller:
                     print(f"   {Colors.OKGREEN}✅ Node.js y npm verificados y funcionando.{Colors.ENDC}")
                     return True
                 elif node_installed_after and not npm_installed_after:
-                    print(f"   {Colors.FAIL}❌ Node.js está instalado, pero npm sigue sin encontrarse después de la instalación/actualización.{Colors.ENDC}")
-                    self.logger.error("npm no encontrado después de la instalación de Node.js.")
-                    return False
-                elif not node_installed_after: # Should not happen if installation_succeeded_or_skipped is true unless dep_checker is inconsistent
+                    print(f"   {Colors.WARNING}⚠️ Node.js está instalado, pero npm sigue sin encontrarse.{Colors.ENDC}")
+                    self.logger.warning("npm no encontrado después del intento de instalación inicial de Node.js. Intentando reinstalación con MSI.")
+
+                    # Attempt to fix missing npm by re-running MSI installer (Windows specific)
+                    if system == 'windows':
+                        print(f"   {Colors.OKBLUE}ℹ️ Intentando reinstalar Node.js desde MSI para asegurar npm...{Colors.ENDC}")
+                        msi_url = "https://nodejs.org/dist/v20.10.0/node-v20.10.0-x64.msi" # Using a recent LTS version
+                        msi_installer_path = self.temp_dir / "nodejs-lts-installer.msi"
+                        msi_reinstall_succeeded = False
+                        if self.download_with_progress(msi_url, msi_installer_path, "Node.js LTS MSI"):
+                            # Using /faumus to force reinstall all files. /quiet for silent.
+                            # May require admin rights.
+                            # Note: The original script's manual download section didn't explicitly use admin for MSI.
+                            # This might still be an issue if not run as admin.
+                            msi_success, _, msi_stderr, _ = self.run_command(
+                                f'msiexec /i "{msi_installer_path}" /quiet /norestart REINSTALL=ALL REINSTALLMODE=vomus',
+                                "Reinstalando Node.js con MSI"
+                            )
+                            if msi_success:
+                                print(f"   {Colors.OKGREEN}✅ Reinstalación con MSI completada.{Colors.ENDC}")
+                                msi_reinstall_succeeded = True
+                            else:
+                                print(f"   {Colors.FAIL}❌ Fallo la reinstalación con MSI. Detalles: {msi_stderr or 'N/A'}{Colors.ENDC}")
+                                self.logger.error(f"Fallo la reinstalación de Node.js con MSI. Stderr: {msi_stderr}")
+                        else:
+                            self.logger.error("Fallo la descarga del MSI de Node.js para reinstalación.")
+
+                        if msi_reinstall_succeeded:
+                            self.logger.info("Verificando npm después de la reinstalación con MSI.")
+                            npm_installed_after_msi, _, _ = self.dep_checker.check_dependency('npm')
+                            if npm_installed_after_msi:
+                                print(f"   {Colors.OKGREEN}✅ npm encontrado después de la reinstalación con MSI.{Colors.ENDC}")
+                                return True
+                            else:
+                                print(f"   {Colors.FAIL}❌ npm sigue sin encontrarse después de la reinstalación con MSI.{Colors.ENDC}")
+                                self.logger.error("npm todavía no encontrado después de la reinstalación con MSI.")
+                                return False
+                        else: # MSI reinstall failed or download failed
+                            return False
+                    else: # Not windows, and npm is missing
+                         print(f"   {Colors.FAIL}❌ Node.js está instalado, pero npm sigue sin encontrarse (sistema no Windows, no se intentó reinstalación con MSI).{Colors.ENDC}")
+                         self.logger.error("npm no encontrado después de la instalación de Node.js (no Windows).")
+                         return False
+
+                elif not node_installed_after:
                     print(f"   {Colors.FAIL}❌ Node.js no se encuentra después del intento de instalación/actualización.{Colors.ENDC}")
                     self.logger.error("Node.js no encontrado después de un supuesto éxito de instalación/actualización.")
                     return False
-                else: # Should not be reached
-                    return False
-            else:
-                # Installation attempt failed genuinely
-                print(f"   {Colors.FAIL}❌ Error en la instalación de Node.js/npm.{Colors.ENDC}")
-                if final_stderr:
-                     print(f"      {Colors.FAIL}Detalles del error: {final_stderr.strip()}{Colors.ENDC}")
-                return False
+                # No specific 'else' needed here, covered by subsequent failure path
+
+            # If installation_succeeded_or_skipped is False (genuine failure from package manager/download)
+            print(f"   {Colors.FAIL}❌ Error en la instalación de Node.js/npm.{Colors.ENDC}")
+            if final_stderr: # This final_stderr is from the initial package manager attempt
+                 print(f"      {Colors.FAIL}Detalles del error inicial: {final_stderr.strip()}{Colors.ENDC}")
+            return False
                 
         except Exception as e:
             self.logger.error(f"Excepción durante la instalación de Node.js: {e}")
