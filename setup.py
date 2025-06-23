@@ -1482,12 +1482,41 @@ def main():
                     # Using 'start /B' here for the .bat might be redundant or even counterproductive if not handled carefully.
                     # Let's ensure the CWD is correct.
                     try:
-                        subprocess.run(['cmd', '/c', script_to_run.name], cwd=str(script_to_run.parent), check=True, shell=False)
-                        installer.print_step("Script de inicio invocado. El sistema debería estar iniciándose en segundo plano.", "success")
-                    except subprocess.CalledProcessError as e:
-                        installer.print_step(f"El script de inicio ({script_to_run.name}) encontró un error: {e}", "error")
+                        # MODIFICACIÓN: Capturar salida de start.bat
+                        process_result = subprocess.run(
+                            ['cmd', '/c', script_to_run.name],
+                            cwd=str(script_to_run.parent),
+                            check=False,  # No lanzar excepción inmediatamente
+                            shell=False,
+                            capture_output=True, # Capturar stdout/stderr
+                            text=True, # Decodificar salida como texto
+                            encoding='utf-8', # Especificar encoding
+                            errors='replace' # Reemplazar caracteres problemáticos
+                        )
+
+                        # Guardar salida en un log
+                        log_dir = installer.install_dir / "logs"
+                        log_dir.mkdir(exist_ok=True) # Asegurar que el directorio de logs existe
+                        output_log_file = log_dir / "setup_start_bat_output.log"
+
+                        with open(output_log_file, "w", encoding='utf-8') as f_log:
+                            f_log.write("--- STDOUT ---\n")
+                            f_log.write(process_result.stdout if process_result.stdout else "[No stdout]\n")
+                            f_log.write("\n--- STDERR ---\n")
+                            f_log.write(process_result.stderr if process_result.stderr else "[No stderr]\n")
+                            f_log.write(f"\n--- Return Code: {process_result.returncode} ---\n")
+
+                        if process_result.returncode == 0:
+                            installer.print_step(f"Script de inicio invocado. Salida registrada en {output_log_file}", "success")
+                        else:
+                            installer.print_step(f"El script de inicio ({script_to_run.name}) finalizó con código {process_result.returncode}. Salida registrada en {output_log_file}", "error")
+
+                    except subprocess.CalledProcessError as e: # Esto no debería ocurrir con check=False
+                        installer.print_step(f"El script de inicio ({script_to_run.name}) encontró un error (CalledProcessError): {e}. stdout: {e.stdout}, stderr: {e.stderr}", "error")
                     except FileNotFoundError:
                         installer.print_step(f"Error: No se encontró el script de inicio en {script_to_run}", "error")
+                    except Exception as e: # Captura general para otros errores
+                        installer.print_step(f"Error inesperado al ejecutar {script_to_run.name}: {e}", "error")
                 else:
                     script_to_run = installer.install_dir / "scripts" / "start.sh"
                     installer.print_step(f"Ejecutando script de inicio: {script_to_run}...", "info")
