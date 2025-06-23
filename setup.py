@@ -1039,7 +1039,7 @@ echo Esperando a que Ollama esté listo...
 timeout /t 5 /nobreak >nul
 
 echo Descargando modelo por defecto...
-ollama pull llama2
+ollama pull llama3.1:8b
 
 echo Creando red MCP...
 docker network create mcp-network 2>nul
@@ -1084,7 +1084,7 @@ sleep 5
 
 # Descargar modelo por defecto
 echo "Descargando modelo por defecto..."
-ollama pull llama2
+ollama pull llama3.1:8b
 
 # Crear red MCP
 echo "Creando red MCP..."
@@ -1148,7 +1148,7 @@ echo "Sistema detenido."
         time.sleep(5)
         
         # Modelos básicos a instalar
-        models = ["llama2", "codellama:7b", "mistral"]
+        models = ["magistral:24b", "qwen3:32b", "llama3.1:8b"]
         
         for model in models:
             self.print_step(f"Descargando modelo {model}...")
