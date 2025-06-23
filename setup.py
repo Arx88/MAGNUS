@@ -1557,51 +1557,57 @@ def main():
                         process_result = None # Inicializar por si subprocess.run falla catastróficamente
 
                         try: # Bloque try interno para la ejecución de subprocess y el logging principal
-                            process_result = subprocess.run(
+                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Intentando lanzar start.bat con Popen y DETACHED_PROCESS/CREATE_NEW_CONSOLE.\n")
+
+                            # Usar Popen para más control sobre la creación del proceso
+                            process = subprocess.Popen(
                                 ['cmd', '/c', script_to_run.name],
                                 cwd=str(script_to_run.parent),
-                                check=False,
-                                shell=False,
-                                capture_output=True,
+                                shell=False, # shell=False es más seguro con listas de argumentos
+                                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_CONSOLE,
+                                stdout=subprocess.PIPE, # Aunque sea detached, podemos intentar capturar si es posible
+                                stderr=subprocess.PIPE,
                                 text=True,
                                 encoding='utf-8',
                                 errors='replace'
                             )
 
                             with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Después de llamar a subprocess.run.\n")
-                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Return code de start.bat: {process_result.returncode if process_result else 'N/A'}\n")
-                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Intentando escribir setup_start_bat_output.log.\n")
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] start.bat lanzado con Popen. PID (si está disponible): {process.pid}.\n")
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] setup.py continuará y finalizará. Revisa si apareció una nueva ventana para start.bat.\n")
 
-                            # Guardar salida en un log (el que ya teníamos)
-                            output_log_file = log_dir_for_trace / "setup_start_bat_output.log"
+                            # stdout, stderr = process.communicate(timeout=10) # Podríamos intentar un communicate con timeout
+                                                                            # pero con detached process esto podría no funcionar como se espera.
+                                                                            # Por ahora, solo lo lanzamos.
 
-                            with open(output_log_file, "w", encoding='utf-8') as f_log:
-                                f_log.write("--- STDOUT ---\n")
-                                f_log.write(process_result.stdout if process_result and process_result.stdout else "[No stdout]\n")
-                                f_log.write("\n--- STDERR ---\n")
-                                f_log.write(process_result.stderr if process_result and process_result.stderr else "[No stderr]\n")
-                                f_log.write(f"\n--- Return Code: {process_result.returncode if process_result else 'N/A'} ---\n")
+                            # No podemos obtener process_result.returncode directamente de Popen sin esperar.
+                            # El objetivo aquí es ver si start.bat se ejecuta y si su ventana muestra algo.
+                            # El logging de la salida de start.bat (stdout/stderr) a setup_start_bat_output.log
+                            # probablemente no funcionará como antes con DETACHED_PROCESS si no usamos communicate().
 
+                            # Eliminamos la escritura a setup_start_bat_output.log por ahora,
+                            # ya que el foco es ver si start.bat se ejecuta visiblemente.
+                            # El log de start.bat (debug_start_bat.log y docker_compose_output.log si start.bat está modificado)
+                            # sería la fuente de información de lo que hace start.bat.
+
+                            installer.print_step(f"Script de inicio ({script_to_run.name}) invocado en una nueva ventana (esperado).", "info")
+                            installer.print_step("Revisa si apareció una nueva ventana de consola para start.bat y si muestra errores.", "warning")
+                            installer.print_step("setup.py ahora esperará 15 segundos antes de salir para dar tiempo a observar.", "info")
+                            time.sleep(15) # Dar tiempo a observar la nueva ventana
+
+                        except Exception as sub_e: # Captura error de Popen
                             with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Escritura de setup_start_bat_output.log completada.\n")
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] EXCEPCIÓN durante subprocess.Popen: {sub_e}\n")
+                            installer.print_step(f"Excepción al intentar lanzar {script_to_run.name} con Popen: {sub_e}", "error")
 
-                            if process_result and process_result.returncode == 0:
-                                installer.print_step(f"Script de inicio invocado. Salida registrada en {output_log_file}", "success")
-                            else:
-                                installer.print_step(f"El script de inicio ({script_to_run.name}) finalizó con código {process_result.returncode if process_result else 'N/A'}. Salida registrada en {output_log_file}", "error")
-
-                        except Exception as sub_e: # Captura error de subprocess.run o del logging principal
-                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] EXCEPCIÓN durante subprocess.run o logging principal: {sub_e}\n")
-                            installer.print_step(f"Excepción al ejecutar/registrar {script_to_run.name}: {sub_e}", "error")
-                            # Re-lanzar para que el try...except externo lo maneje si es necesario, o manejarlo aquí.
-                            # Por ahora, lo registramos y dejamos que el flujo continúe si es posible,
-                            # o que el error original de subprocess.run (si es el caso) se propague.
-
-                        finally: # Finally para el try interno de subprocess
-                            with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Bloque finally del try interno de subprocess alcanzado.\n")
+                        # El bloque finally original ya no es tan relevante aquí porque no estamos esperando a process_result
+                        # pero lo dejamos por si acaso, o lo podemos eliminar/ajustar.
+                        # Por ahora, lo comentaré para simplificar, ya que su propósito original
+                        # estaba ligado a la finalización de subprocess.run.
+                        # finally: # Finally para el try interno de subprocess
+                        #     with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
+                        #         trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Bloque finally del try interno de Popen (ajustado) alcanzado.\n")
 
                     # except originales del script
                     except subprocess.CalledProcessError as e:
