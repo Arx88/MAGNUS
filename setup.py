@@ -1564,17 +1564,20 @@ def main():
                             # Intentar con la ruta completa al script
                             full_script_path = str(script_to_run.resolve())
                             with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Usando ruta completa para Popen: {full_script_path}.\n")
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Intentando Popen con shell=True y ruta completa: {full_script_path}.\n")
 
                             process = subprocess.Popen(
-                                ['cmd', '/c', full_script_path], # Usar ruta completa
-                                cwd=str(script_to_run.parent), # Mantener CWD por si start.bat depende de él para otros archivos
-                                shell=False,
+                                # Cuando shell=True, Popen espera una cadena para el comando si es complejo,
+                                # o una lista donde el primer elemento es el ejecutable y el resto son sus args.
+                                # Para ejecutar un .bat directamente, la ruta al .bat como cadena es lo más simple.
+                                full_script_path, # Directamente la ruta al .bat como una cadena
+                                cwd=str(script_to_run.parent),
+                                shell=True, # Establecer shell=True
                                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_CONSOLE
                             )
 
                             with open(trace_log_file_path, "a", encoding='utf-8') as trace_f:
-                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] start.bat lanzado con Popen (ruta completa, sin captura stdout/stderr directa). PID (si está disponible): {process.pid}.\n")
+                                trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] start.bat lanzado con Popen (shell=True, ruta completa). PID (si está disponible): {process.pid}.\n")
                                 trace_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] setup.py continuará y finalizará. Revisa si apareció una nueva ventana para start.bat.\n")
 
                             # stdout, stderr = process.communicate(timeout=10) # Podríamos intentar un communicate con timeout
