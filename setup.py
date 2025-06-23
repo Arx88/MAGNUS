@@ -223,20 +223,99 @@ class DependencyChecker:
         dep = self.dependencies[name]
         
         try:
+            # Initial attempt
+            command_parts = dep['command'].split()
             result = subprocess.run(
-                dep['command'].split(),
+                command_parts,
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10,
+                # Add PATH to environment to help find commands, esp. on Windows after install
+                env=os.environ.copy()
             )
             
             if result.returncode == 0:
                 version = self._extract_version(result.stdout)
-                return True, version, "Instalado"
-            else:
-                return False, "0.0", "No encontrado"
+                # Ensure version is not "unknown" or empty if command succeeded
+                if version != "unknown" and version.strip():
+                    return True, version, "Instalado"
+                # If version extraction failed despite command success, log and treat as not found for safety
+                self.logger.warning(f"Comando para {name} exitoso pero no se pudo extraer la versión: {result.stdout}")
+                # Fall through to alternative methods if name is 'npm'
+
+            # If the first attempt failed (or version extraction failed for 'npm')
+            # and the dependency is 'npm', try finding it via node's path
+            if name == 'npm' and (result.returncode != 0 or version == "unknown" or not version.strip()):
+                self.logger.debug(f"Intento inicial para npm falló o no extrajo versión. Buscando npm via node.")
+                node_executable_path = shutil.which("node")
+                if node_executable_path:
+                    self.logger.debug(f"Node ejecutable encontrado en: {node_executable_path}")
+                    node_dir = Path(node_executable_path).parent
+                    npm_executable_name = "npm.cmd" if platform.system().lower() == "windows" else "npm"
+                    npm_path_via_node = node_dir / npm_executable_name
+
+                    if npm_path_via_node.exists() and npm_path_via_node.is_file():
+                        self.logger.debug(f"Probando npm en: {npm_path_via_node}")
+                        alt_command = [str(npm_path_via_node), "--version"]
+                        alt_result = subprocess.run(
+                            alt_command,
+                            capture_output=True,
+                            text=True,
+                            timeout=10,
+                            env=os.environ.copy()
+                        )
+                        if alt_result.returncode == 0:
+                            alt_version = self._extract_version(alt_result.stdout)
+                            if alt_version != "unknown" and alt_version.strip():
+                                self.logger.info(f"npm encontrado via node en {npm_path_via_node} con versión {alt_version}")
+                                return True, alt_version, "Instalado (via node)"
+                            else:
+                                self.logger.warning(f"npm via node exitoso pero no se pudo extraer la versión: {alt_result.stdout}")
+                    else:
+                        self.logger.debug(f"npm no encontrado en la ruta de node: {npm_path_via_node}")
+                else:
+                    self.logger.debug("Node ejecutable no encontrado, no se puede buscar npm via node.")
+
+            # If all attempts fail
+            return False, "0.0", "No encontrado"
                 
-        except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError) as e:
+            self.logger.debug(f"Excepción verificando {name}: {e}")
+            # Try finding npm via node if a FileNotFoundError occurs for the direct 'npm' command
+            if name == 'npm' and isinstance(e, FileNotFoundError):
+                self.logger.debug(f"FileNotFoundError para npm. Buscando npm via node.")
+                node_executable_path = shutil.which("node")
+                if node_executable_path:
+                    self.logger.debug(f"Node ejecutable encontrado en: {node_executable_path}")
+                    node_dir = Path(node_executable_path).parent
+                    npm_executable_name = "npm.cmd" if platform.system().lower() == "windows" else "npm"
+                    npm_path_via_node = node_dir / npm_executable_name
+
+                    if npm_path_via_node.exists() and npm_path_via_node.is_file():
+                        self.logger.debug(f"Probando npm en: {npm_path_via_node}")
+                        alt_command = [str(npm_path_via_node), "--version"]
+                        try:
+                            alt_result = subprocess.run(
+                                alt_command,
+                                capture_output=True,
+                                text=True,
+                                timeout=10,
+                                env=os.environ.copy()
+                            )
+                            if alt_result.returncode == 0:
+                                alt_version = self._extract_version(alt_result.stdout)
+                                if alt_version != "unknown" and alt_version.strip():
+                                    self.logger.info(f"npm encontrado via node (después de excepción) en {npm_path_via_node} con versión {alt_version}")
+                                    return True, alt_version, "Instalado (via node)"
+                                else:
+                                    self.logger.warning(f"npm via node exitoso (después de excepción) pero no se pudo extraer la versión: {alt_result.stdout}")
+                        except Exception as e_alt:
+                             self.logger.debug(f"Excepción verificando npm via node: {e_alt}")
+                    else:
+                        self.logger.debug(f"npm no encontrado en la ruta de node (después de excepción): {npm_path_via_node}")
+                else:
+                    self.logger.debug("Node ejecutable no encontrado (después de excepción), no se puede buscar npm via node.")
+
             return False, "0.0", "No encontrado"
     
     def _extract_version(self, output: str) -> str:
@@ -784,9 +863,15 @@ class ManusInstaller:
 
             # Post-installation verification for Node and especially NPM
             if installation_succeeded_or_skipped:
-                self.logger.info("Verificando Node.js y npm después del intento de instalación/actualización inicial.")
-                node_installed_after, _, _ = self.dep_checker.check_dependency('node')
-                npm_installed_after, _, _ = self.dep_checker.check_dependency('npm')
+                self.logger.info("Iniciando verificación post-instalación para Node.js y npm.")
+                print(f"   {Colors.OKBLUE}ℹ️ Verificando Node.js y npm después del intento de instalación/actualización...{Colors.ENDC}")
+
+                # Force a re-check here, results are not cached in a way that helps if PATH just changed.
+                node_installed_after, node_version_after, _ = self.dep_checker.check_dependency('node')
+                npm_installed_after, npm_version_after, npm_status_after = self.dep_checker.check_dependency('npm')
+
+                self.logger.info(f"Verificación post-instalación Node: {node_installed_after} ({node_version_after}). NPM: {npm_installed_after} ({npm_version_after}, Status: {npm_status_after})")
+
 
                 if node_installed_after and npm_installed_after:
                     print(f"   {Colors.OKGREEN}✅ Node.js y npm verificados y funcionando.{Colors.ENDC}")
