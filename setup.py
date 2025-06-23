@@ -1442,13 +1442,21 @@ def main():
         # Check for admin rights and re-launch if necessary
         if not installer.is_admin:
             installer.print_step("Se requieren permisos de administrador.", "warning")
+            installer.print_step("Se requieren permisos de administrador para continuar.", "warning")
+            installer.print_step("El script intentará solicitar estos permisos.", "info")
+            installer.print_step("Si aparece una ventana de Control de Cuentas de Usuario (UAC), por favor acepte.", "info")
+            installer.print_step("Se abrirá una NUEVA VENTANA de consola donde continuará la instalación.", "info")
+            installer.print_step("Por favor, siga las instrucciones en la NUEVA ventana.", "info")
+            input("Presione Enter para intentar la elevación de privilegios...") # Pause for user to read
+
             installer.print_step("Intentando re-lanzar con privilegios elevados...", "info")
             installer._run_as_admin() # This will exit if ShellExecuteW fails, or replace process on Unix
             # If _run_as_admin on Windows returns (because ShellExecuteW > 32), it means it *attempted* to start the new process.
             # The current non-admin script should now inform the user and exit.
-            installer.print_step("Solicitud de elevación enviada. Por favor, observe la nueva ventana de la consola para ver el progreso.", "info")
-            installer.print_step("Esta ventana se cerrará en unos segundos...", "info")
-            time.sleep(5) # Give user time to read
+            # The previous messages already informed the user about the new window.
+            installer.print_step("Si la elevación fue exitosa, la instalación continuará en una nueva ventana.", "info")
+            installer.print_step("Esta ventana actual se cerrará en 10 segundos...", "info")
+            time.sleep(10) # Give user time to read
             sys.exit(0) # Gracefully exit the non-elevated script
 
         # If we reach here, we are running with admin rights (either initially or after elevation)
@@ -1466,13 +1474,24 @@ def main():
                 script_to_run = ""
                 if installer.system == "windows":
                     script_to_run = installer.install_dir / "scripts" / "start.bat"
-                    # Explicitly use cmd.exe and set working directory
-                    subprocess.call(['cmd', '/c', script_to_run.name], cwd=str(script_to_run.parent))
+                    installer.print_step(f"Ejecutando script de inicio: {script_to_run}...", "info")
+                    # Use subprocess.run with arguments to attempt to keep it in the same window
+                    # 'cmd /c start /B your_script.bat'
+                    # The start.bat itself uses 'start /B' for ollama, and 'docker-compose up -d' is non-blocking.
+                    # So, simply calling the bat file with 'cmd /c' should be sufficient if the console is already the elevated one.
+                    # Using 'start /B' here for the .bat might be redundant or even counterproductive if not handled carefully.
+                    # Let's ensure the CWD is correct.
+                    try:
+                        subprocess.run(['cmd', '/c', script_to_run.name], cwd=str(script_to_run.parent), check=True, shell=False)
+                        installer.print_step("Script de inicio invocado. El sistema debería estar iniciándose en segundo plano.", "success")
+                    except subprocess.CalledProcessError as e:
+                        installer.print_step(f"El script de inicio ({script_to_run.name}) encontró un error: {e}", "error")
+                    except FileNotFoundError:
+                        installer.print_step(f"Error: No se encontró el script de inicio en {script_to_run}", "error")
                 else:
                     script_to_run = installer.install_dir / "scripts" / "start.sh"
+                    installer.print_step(f"Ejecutando script de inicio: {script_to_run}...", "info")
                     # For Linux/macOS, os.system is generally fine as it often inherits the console
-                    # but subprocess.call can also be used for consistency if needed.
-                    # For now, keeping os.system for non-Windows as it was not reported as problematic.
                     os.system(f'sh "{script_to_run}"') # Ensure sh is used for .sh
         else:
             # This message is from the ELEVATED script if run_installation() returns False
