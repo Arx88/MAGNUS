@@ -130,8 +130,14 @@ class Logger:
     def warning(self, message: str):
         self.logger.warning(message)
     
-    def error(self, message: str):
-        self.logger.error(message)
+    def error(self, message: str, include_stdout_stderr: bool = False, stdout: str = "", stderr: str = ""):
+        full_message = message
+        if include_stdout_stderr:
+            if stdout:
+                full_message += f"\n  STDOUT: {stdout}"
+            if stderr:
+                full_message += f"\n  STDERR: {stderr}"
+        self.logger.error(full_message)
     
     def debug(self, message: str):
         self.logger.debug(message)
@@ -377,17 +383,24 @@ class ManusInstaller:
             )
             
             stdout, stderr = process.communicate(timeout=timeout)
-            success = process.returncode == 0
-            
+            return_code = process.returncode
+            success = return_code == 0
+
+            log_message = f"Comando: {command}\n  Exitoso: {success}\n  Código de retorno: {return_code}"
+            if stdout:
+                log_message += f"\n  STDOUT: {stdout.strip()}"
+            if stderr:
+                log_message += f"\n  STDERR: {stderr.strip()}"
+
             if success:
-                self.logger.debug(f"Comando exitoso: {command}")
+                self.logger.debug(log_message)
             else:
-                self.logger.error(f"Comando falló: {command} - {stderr}")
+                self.logger.error(log_message) # stderr is now part of the structured log
             
             return success, stdout, stderr
             
         except subprocess.TimeoutExpired:
-            process.kill()
+            if process: process.kill()
             error_msg = f"Comando excedió timeout de {timeout}s"
             self.logger.error(f"{error_msg}: {command}")
             return False, "", error_msg
@@ -440,30 +453,76 @@ class ManusInstaller:
         
         system = self.system_info['system']
         package_manager = self.system_info['package_manager']
-        
+        is_admin = self.system_info['is_admin']
+        is_wsl_detected = self.system_info['is_wsl'] # Relies on /proc/version, may not be perfect for "WSL installed"
+
+        # Pre-check for Docker on Windows
+        if system == 'windows':
+            if not is_admin:
+                print(f"   {Colors.WARNING}⚠️  Advertencia: La instalación de Docker Desktop generalmente requiere permisos de administrador.{Colors.ENDC}")
+                print(f"   {Colors.WARNING}   Es posible que deba confirmar un aviso de UAC (Control de Cuentas de Usuario) manualmente.{Colors.ENDC}")
+                self.logger.warning("Intentando instalar Docker sin permisos de administrador detectados. Puede requerir UAC.")
+
+            # WSL2 check (basic detection)
+            # A more robust check would involve `wsl --status` or checking registry keys,
+            # but that's more complex for this script. This relies on the initial WSL detection.
+            # The original script showed "WSL: No" for the user.
+            try:
+                # Try to get more accurate WSL status if possible
+                # This command might fail if WSL is not installed at all.
+                wsl_status_check = subprocess.run("wsl.exe --status", shell=True, capture_output=True, text=True, timeout=10)
+                if wsl_status_check.returncode == 0 and "Versión de WSL: 2" in wsl_status_check.stdout: # Check for WSL2 specifically if possible
+                    is_wsl_active_and_v2 = True
+                else:
+                    is_wsl_active_and_v2 = False # Covers WSL1 or WSL not fully functional
+            except (subprocess.TimeoutExpired, FileNotFoundError): # FileNotFoundError if wsl.exe not found
+                 is_wsl_active_and_v2 = False
+
+            if not is_wsl_active_and_v2:
+                print(f"   {Colors.WARNING}⚠️  Advertencia: Docker Desktop en Windows requiere WSL2 (Subsistema de Windows para Linux v2).{Colors.ENDC}")
+                print(f"   {Colors.WARNING}   WSL2 no parece estar instalado o activo en su sistema.{Colors.ENDC}")
+                print(f"   {Colors.WARNING}   Por favor, asegúrese de que WSL2 esté instalado y habilitado. Puede encontrar instrucciones en:")
+                print(f"   {Colors.WARNING}   https://docs.microsoft.com/es-es/windows/wsl/install{Colors.ENDC}")
+                self.logger.warning("WSL2 no detectado o no activo. Docker Desktop podría fallar en la instalación o ejecución.")
+                # For now, we'll still attempt installation, but this warning is crucial.
+                # A future improvement could be to offer to try and install WSL2.
+
         try:
             if system == 'windows':
+                # Check if Docker is already installed
+                docker_installed, _, _ = self.dep_checker.check_dependency('docker')
+                if docker_installed:
+                    print(f"   {Colors.OKGREEN}✅ Docker ya está instalado.{Colors.ENDC}")
+                    # Optionally, ask if user wants to reinstall or skip. For now, skip.
+                    return True
+
                 if package_manager == 'winget':
-                    success, _, stderr = self.run_command(
+                    success, stdout, stderr = self.run_command(
                         "winget install Docker.DockerDesktop --accept-package-agreements --accept-source-agreements",
-                        "Instalando Docker Desktop"
+                        "Instalando Docker Desktop con winget"
                     )
                 elif package_manager == 'choco':
-                    success, _, stderr = self.run_command(
+                    success, stdout, stderr = self.run_command(
                         "choco install docker-desktop -y",
                         "Instalando Docker Desktop con Chocolatey"
                     )
                 else:
                     # Descarga manual
+                    print(f"   {Colors.OKBLUE}ℹ️ Winget/Choco no detectado. Intentando descarga manual de Docker Desktop...{Colors.ENDC}")
                     url = "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe"
                     installer_path = self.temp_dir / "docker-installer.exe"
                     
                     if self.download_with_progress(url, installer_path, "Docker Desktop"):
-                        success, _, stderr = self.run_command(
-                            f'"{installer_path}" install --quiet',
-                            "Instalando Docker Desktop"
+                        # Note: Silent install for the official .exe can be tricky and might still show UAC.
+                        # The --quiet flag is a common convention but not guaranteed for all installers.
+                        success, stdout, stderr = self.run_command(
+                            f'"{installer_path}" install --quiet', # The installer might have different silent flags e.g., /S, /quiet, --silent
+                            "Instalando Docker Desktop (descarga manual)"
                         )
+                        if not success and not is_admin:
+                             print(f"   {Colors.WARNING}⚠️  La instalación manual también puede requerir ejecución como administrador.{Colors.ENDC}")
                     else:
+                        self.logger.error("Fallo la descarga manual de Docker Desktop.")
                         return False
             
             elif system == 'darwin':  # macOS
@@ -529,15 +588,26 @@ class ManusInstaller:
                     print(f"   {Colors.OKGREEN}✅ Docker verificado y funcionando{Colors.ENDC}")
                     return True
                 else:
-                    print(f"   {Colors.WARNING}⚠️  Docker instalado pero no responde{Colors.ENDC}")
-                    return False
+                    # This part is tricky because the 'docker --version' command might fail if the Docker daemon/service
+                    # isn't running yet, which can take time after installation, or require a reboot/re-login.
+                    print(f"   {Colors.WARNING}⚠️  Docker parece instalado, pero 'docker --version' falló o no respondió a tiempo.{Colors.ENDC}")
+                    print(f"   {Colors.WARNING}   Puede que necesite iniciar Docker Desktop manualmente o reiniciar su sistema.{Colors.ENDC}")
+                    self.logger.warning("Docker instalado pero 'docker --version' falló post-instalación.")
+                    return True # Return true because the installation command itself succeeded. Verification is a separate concern.
             else:
-                print(f"   {Colors.FAIL}❌ Error instalando Docker: {stderr}{Colors.ENDC}")
+                # Ensure stderr from run_command is available here for better error message
+                error_details = stderr.strip() if stderr else "No se capturó salida de error específica."
+                self.logger.error(f"Fallo en el comando de instalación de Docker. Detalles: {error_details}", include_stdout_stderr=True, stdout=stdout, stderr=stderr)
+                print(f"   {Colors.FAIL}❌ Error instalando Docker.{Colors.ENDC}")
+                if system == 'windows':
+                    print(f"   {Colors.FAIL}   Detalles: {error_details}{Colors.ENDC}")
+                    print(f"   {Colors.FAIL}   Asegúrese de estar ejecutando el script como administrador y que WSL2 esté instalado y habilitado.{Colors.ENDC}")
+                    print(f"   {Colors.FAIL}   Puede intentar descargar Docker Desktop manualmente desde: https://www.docker.com/products/docker-desktop{Colors.ENDC}")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"Error en instalación de Docker: {e}")
-            print(f"   {Colors.FAIL}❌ Error inesperado: {e}{Colors.ENDC}")
+            self.logger.error(f"Excepción durante la instalación de Docker: {e}")
+            print(f"   {Colors.FAIL}❌ Error inesperado durante la instalación de Docker: {e}{Colors.ENDC}")
             return False
     
     def install_nodejs(self) -> bool:
