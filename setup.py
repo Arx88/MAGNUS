@@ -203,6 +203,8 @@ class SystemInstaller:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    encoding='utf-8',
+                    errors='replace',
                     check=False
                 )
                 # Check for specific winget "already installed" exit code
@@ -223,6 +225,8 @@ class SystemInstaller:
                         shell=shell,
                         capture_output=True,
                         text=True,
+                        encoding='utf-8',
+                        errors='replace',
                         check=True
                     )
                     return 0, process.stdout.strip() # Success is exit code 0
@@ -232,6 +236,8 @@ class SystemInstaller:
                         shell=shell,
                         capture_output=True,
                         text=True,
+                        encoding='utf-8',
+                        errors='replace',
                         check=False
                     )
                     output_msg = process.stdout.strip() if process.returncode == 0 else \
