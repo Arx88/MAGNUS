@@ -37,6 +37,20 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+# Log muy temprano
+TEMP_DIR_PATH = Path(tempfile.gettempdir())
+VERY_EARLY_LOG_FILE = TEMP_DIR_PATH / "manus_setup_very_early_log.txt"
+
+def write_very_early_log(message: str):
+    """Escribe un mensaje al log muy temprano."""
+    try:
+        with open(VERY_EARLY_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
+    except Exception as e:
+        # No hacer print aquí ya que podría ser demasiado temprano o causar problemas
+        # Simplemente intentamos loguear, si falla, falla silenciosamente.
+        pass
+
 class Colors:
     """Colores para output en terminal"""
     HEADER = '\033[95m'
@@ -55,14 +69,18 @@ class SystemInstaller:
     def __init__(self):
         self.system = platform.system().lower()
         self.arch = platform.machine().lower()
+        write_very_early_log(f"SystemInstaller.__init__: system={self.system}, arch={self.arch}")
 
         # Initial Python check before anything else
         if not self._check_python_installation():
+            write_very_early_log("SystemInstaller.__init__: Python check failed. Exiting.")
             self.print_step("Critical Python setup issue detected. Please see the messages above.", "error")
             sys.exit(1)
+        write_very_early_log("SystemInstaller.__init__: Python check successful.")
 
         self.is_admin = self._check_admin()
         self.install_dir = Path.home() / "manus-system"
+        write_very_early_log(f"SystemInstaller.__init__: self.install_dir = {self.install_dir}")
         self.config = {}
         
         # URLs de descarga
@@ -1427,20 +1445,40 @@ StartupNotify=true
 
 def main():
     """Función principal"""
-    installer = SystemInstaller() # Python check happens in __init__
-    
-    # Early log for elevated process
+    write_very_early_log("main(): Script started.")
+    try:
+        installer = SystemInstaller() # Python check happens in __init__
+        write_very_early_log("main(): SystemInstaller instance created.")
+    except Exception as e:
+        write_very_early_log(f"main(): EXCEPTION during SystemInstaller instantiation: {e}")
+        # Attempt to print to console as a last resort, though it might not be visible
+        print(f"Critical error during SystemInstaller instantiation: {e}")
+        sys.exit(1) # Exit if installer can't even be created
+
+    # Early log for elevated process (using the new very_early_log)
     if installer.is_admin:
-        log_file_path = Path(tempfile.gettempdir()) / "manus_setup_elevated.log"
+        write_very_early_log(f"main(): Running as admin. Python: {sys.executable}")
+    else:
+        write_very_early_log(f"main(): Not running as admin. Python: {sys.executable}")
+
+    # The old log_file_path for manus_setup_elevated.log can be removed or kept.
+    # For now, let's keep it to see if it also works, but our primary focus is VERY_EARLY_LOG_FILE.
+    log_file_path = None # Initialize
+    if installer.is_admin:
+        log_file_path = Path(tempfile.gettempdir()) / "manus_setup_elevated.log" # Original elevated log
         try:
-            with open(log_file_path, "a", encoding="utf-8") as log_file:
-                log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Elevated script instance started. Python: {sys.executable}\n")
+            with open(log_file_path, "a", encoding="utf-8") as log_f: # Changed variable name
+                log_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Elevated script instance started (old log). Python: {sys.executable}\n")
         except Exception as e:
-            installer.print_step(f"Warning: Could not write to elevated log file {log_file_path}: {e}", "warning")
+            write_very_early_log(f"main(): Warning - Could not write to old elevated log file {log_file_path}: {e}")
+            # installer.print_step might not be safe if installer instance failed, but we check instance creation above.
+            # For safety, using write_very_early_log for this warning.
 
     try:
+        write_very_early_log("main(): Entering main try block.")
         # Check for admin rights and re-launch if necessary
         if not installer.is_admin:
+            write_very_early_log("main(): Admin rights not detected. Attempting elevation.")
             installer.print_step("Se requieren permisos de administrador.", "warning")
             installer.print_step("Se requieren permisos de administrador para continuar.", "warning")
             installer.print_step("El script intentará solicitar estos permisos.", "info")
@@ -1465,14 +1503,21 @@ def main():
                 log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Admin rights confirmed. Calling run_installation().\n")
 
         if installer.run_installation(): # This is the main execution path for the admin instance
+            write_very_early_log("main(): run_installation() completed successfully.")
             installer.show_completion_message()
-            if installer.is_admin and 'log_file_path' in locals():
-                with open(log_file_path, "a", encoding="utf-8") as log_file:
-                    log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Installation successful.\n")
+            if installer.is_admin and 'log_file_path' in locals() and log_file_path is not None: # Check log_file_path not None
+                try: # Add try-except for old log
+                    with open(log_file_path, "a", encoding="utf-8") as log_f: # Changed variable
+                        log_f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Installation successful (old log).\n")
+                except Exception as e:
+                    write_very_early_log(f"main(): Warning - Could not write to old elevated log {log_file_path} on success: {e}")
             
+            write_very_early_log("main(): Before asking to start the system.")
             if input("\n¿Deseas iniciar el sistema ahora? (s/n): ").lower() in ['s', 'y', 'yes', 'sí']:
+                write_very_early_log("main(): User chose to start the system.")
                 script_to_run = ""
                 if installer.system == "windows":
+                    write_very_early_log("main(): System is Windows. Preparing to run start.bat.")
                     script_to_run = installer.install_dir / "scripts" / "start.bat"
                     installer.print_step(f"Ejecutando script de inicio: {script_to_run}...", "info")
                     # Use subprocess.run with arguments to attempt to keep it in the same window
