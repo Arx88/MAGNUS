@@ -79,8 +79,9 @@ class SystemInstaller:
         write_very_early_log("SystemInstaller.__init__: Python check successful.")
 
         self.is_admin = self._check_admin()
-        self.install_dir = Path.home() / "manus-system"
-        write_very_early_log(f"SystemInstaller.__init__: self.install_dir = {self.install_dir}")
+        # Modificación para usar la ruta del script como base para install_dir
+        self.install_dir = Path(__file__).resolve().parent
+        write_very_early_log(f"SystemInstaller.__init__: self.install_dir set to script's parent directory: {self.install_dir}")
         self.config = {}
         
         # URLs de descarga
