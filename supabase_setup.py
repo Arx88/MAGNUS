@@ -131,33 +131,33 @@ def check_supabase_cli():
         if not scoop_available:
             print_info("Scoop no está disponible. Intentando instalar Scoop automáticamente...")
             # No más preguntas aquí, procedemos si attempt_auto_install fue 's'
+            # El siguiente bloque se ejecuta si scoop no está disponible y el usuario aceptó la instalación automática general.
             print_info("Intentando instalar Scoop...")
             ps_command_policy = "Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force"
             ps_command_install = "iex (new-object net.webclient).downloadstring('https://get.scoop.sh')"
 
             print_warning("Cambiando política de ejecución de PowerShell para CurrentUser a RemoteSigned...")
             policy_success, _, policy_err = run_command(["powershell", "-Command", ps_command_policy], timeout=60, check=False)
-                if not policy_success:
-                    print_error(f"No se pudo cambiar la política de ejecución de PowerShell. Detalle: {policy_err}")
-                else:
-                    print_success("Política de ejecución de PowerShell actualizada para CurrentUser.")
-                    print_info("Descargando y ejecutando script de instalación de Scoop...")
-                    install_scoop_success, _, scoop_install_err = run_command(["powershell", "-Command", ps_command_install], timeout=300, check=False)
-                    if install_scoop_success:
-                        print_success("Script de instalación de Scoop ejecutado. Verificando Scoop...")
-                        scoop_available, _, _ = run_command(["scoop", "--version"], suppress_output=True)
-                        if scoop_available:
-                            print_success("¡Scoop instalado exitosamente!")
-                        else:
-                            print_error(f"Scoop no se pudo verificar después de la instalación. Error: {scoop_install_err}")
+            if not policy_success:
+                print_error(f"No se pudo cambiar la política de ejecución de PowerShell. Detalle: {policy_err}")
+            else:
+                print_success("Política de ejecución de PowerShell actualizada para CurrentUser.")
+                print_info("Descargando y ejecutando script de instalación de Scoop...")
+                install_scoop_success, _, scoop_install_err = run_command(["powershell", "-Command", ps_command_install], timeout=300, check=False)
+                if install_scoop_success:
+                    print_success("Script de instalación de Scoop ejecutado. Verificando Scoop...")
+                    scoop_available, _, _ = run_command(["scoop", "--version"], suppress_output=True)
+                    if scoop_available:
+                        print_success("¡Scoop instalado exitosamente!")
                     else:
-                        scoop_install_err_lower = scoop_install_err.lower()
-                        if "running the installer as administrator is disabled" in scoop_install_err_lower or "abort." in scoop_install_err_lower:
-                            print_error("La instalación de Scoop falló porque requiere privilegios de administrador.")
-                            print_warning("Por favor, re-ejecuta este script (supabase_setup.py) como Administrador.")
-                        else:
-                            print_error(f"Falló la ejecución del script de instalación de Scoop. Error: {scoop_install_err}")
-            # No hay 'else' para install_scoop_choice, ya que ahora es automático si se dio el consentimiento inicial.
+                        print_error(f"Scoop no se pudo verificar después de la instalación. Error: {scoop_install_err}")
+                else:
+                    scoop_install_err_lower = scoop_install_err.lower()
+                    if "running the installer as administrator is disabled" in scoop_install_err_lower or "abort." in scoop_install_err_lower:
+                        print_error("La instalación de Scoop falló porque requiere privilegios de administrador.")
+                        print_warning("Por favor, re-ejecuta este script (supabase_setup.py) como Administrador.")
+                    else:
+                        print_error(f"Falló la ejecución del script de instalación de Scoop. Error: {scoop_install_err}")
 
         if scoop_available: # Si estaba disponible o se instaló y verificó
             print_info("Intentando instalar 'supabase' con Scoop...")
