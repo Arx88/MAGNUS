@@ -37,7 +37,7 @@ import {
   XCircle,
   AlertTriangle,
   ExternalLink,
-  Docker
+  Container // Changed from Docker
 } from 'lucide-react'
 
 const toolCategories = {
@@ -546,7 +546,7 @@ export default function ToolsPage() {
                         <span>{tool.name}</span>
                         {tool.official && (
                           <Badge variant="outline" className="text-xs">
-                            <Docker className="w-3 h-3 mr-1" />
+                            <Container className="w-3 h-3 mr-1" /> {/* Changed from Docker */}
                             Oficial
                           </Badge>
                         )}
