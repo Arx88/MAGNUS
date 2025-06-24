@@ -146,7 +146,6 @@ def check_supabase_cli():
                     install_scoop_success, _, scoop_install_err = run_command(["powershell", "-Command", ps_command_install], timeout=300, check=False)
                     if install_scoop_success:
                         print_success("Script de instalación de Scoop ejecutado. Verificando Scoop...")
-                        # Es crucial re-chequear la disponibilidad de scoop aquí ANTES de usarlo.
                         scoop_available, _, _ = run_command(["scoop", "--version"], suppress_output=True)
                         if scoop_available:
                             print_success("¡Scoop instalado exitosamente!")
@@ -157,7 +156,7 @@ def check_supabase_cli():
             else:
                 print_info("Instalación de Scoop omitida por el usuario.")
 
-        if scoop_available: # Si estaba disponible o se instaló y verificó
+        if scoop_available:
             print_info("Intentando instalar 'supabase' con Scoop...")
             install_success, _, _ = run_command(["scoop", "install", "supabase"], timeout=300, check=False)
             if install_success:
@@ -192,136 +191,136 @@ def check_supabase_cli():
         print_info("NPM no está disponible en este sistema. Para usar este método, instala Node.js y NPM.")
 
     # 4. DESCARGA DIRECTA DESDE GITHUB RELEASES (Multiplataforma)
-    # Esta sección se ejecuta si todos los métodos anteriores fallaron Y el usuario aceptó la instalación automática al principio.
     print_header("Intentando descarga directa de Supabase CLI desde GitHub")
     try:
         print_info("Obteniendo información de la última release de Supabase CLI...")
         api_url = "https://api.github.com/repos/supabase/cli/releases/latest"
-        # Manejo de errores de red para la API de GitHub
+        release_data = {} # Inicializar en caso de error de red/API
         try:
-            with urllib.request.urlopen(api_url, timeout=10) as response: # Timeout para la petición
+            with urllib.request.urlopen(api_url, timeout=10) as response:
                 release_data = json.loads(response.read().decode())
         except urllib.error.URLError as e:
             print_error(f"Error de red al contactar la API de GitHub: {e.reason}")
             print_info("Por favor, verifica tu conexión a internet.")
-            # No retornar False aquí, para que el mensaje final de error general se muestre
         except json.JSONDecodeError:
             print_error("No se pudo decodificar la respuesta de la API de GitHub (formato inesperado).")
-        except Exception as e: # Otro error inesperado
+        except Exception as e:
             print_error(f"Error inesperado al obtener datos de release: {e}")
-        else: # Si no hubo errores en la petición y decodificación JSON
-            assets = release_data.get("assets", [])
-            if not assets:
-                print_error("No se encontraron assets en la última release de GitHub.")
+
+        assets = release_data.get("assets", [])
+        if not assets:
+            print_error("No se encontraron assets en la última release de GitHub (o hubo un error previo al obtenerlos).")
+        else:
+            os_type = platform.system().lower()
+            arch = platform.machine().lower()
+
+            asset_filename_part = ""
+            asset_ext = ""
+            exe_name = "supabase"
+
+            if os_type == "windows":
+                asset_ext = ".zip"
+                exe_name = "supabase.exe"
+                if arch in ["amd64", "x86_64"]: asset_filename_part = "windows-amd64"
+                elif arch in ["arm64", "aarch64"]: asset_filename_part = "windows-arm64"
+            elif os_type == "linux":
+                asset_ext = ".tar.gz"
+                if arch in ["amd64", "x86_64"]: asset_filename_part = "linux-amd64"
+                elif arch in ["arm64", "aarch64"]: asset_filename_part = "linux-arm64"
+            elif os_type == "darwin":
+                asset_ext = ".tar.gz"
+                if arch in ["amd64", "x86_64"]: asset_filename_part = "darwin-amd64"
+                elif arch in ["arm64", "aarch64"]: asset_filename_part = "darwin-arm64"
+
+            if not asset_filename_part:
+                print_error(f"Combinación SO/arquitectura no soportada para descarga directa: {os_type}/{arch}")
             else:
-                os_type = platform.system().lower()
-                arch = platform.machine().lower()
+                download_url = None
+                found_asset_name = ""
+                for asset in assets:
+                    name = asset.get("name", "").lower()
+                    if asset_filename_part in name and name.endswith(asset_ext):
+                        download_url = asset.get("browser_download_url")
+                        found_asset_name = name
+                        print_success(f"Asset encontrado para descarga: {found_asset_name}")
+                        break
 
-                asset_filename_part = ""
-                asset_ext = ""
-                exe_name = "supabase"
-
-                if os_type == "windows":
-                    asset_ext = ".zip"
-                    exe_name = "supabase.exe"
-                    if arch in ["amd64", "x86_64"]: asset_filename_part = "windows-amd64"
-                    elif arch in ["arm64", "aarch64"]: asset_filename_part = "windows-arm64"
-                elif os_type == "linux":
-                    asset_ext = ".tar.gz"
-                    if arch in ["amd64", "x86_64"]: asset_filename_part = "linux-amd64"
-                    elif arch in ["arm64", "aarch64"]: asset_filename_part = "linux-arm64"
-                elif os_type == "darwin":
-                    asset_ext = ".tar.gz"
-                    if arch in ["amd64", "x86_64"]: asset_filename_part = "darwin-amd64"
-                    elif arch in ["arm64", "aarch64"]: asset_filename_part = "darwin-arm64"
-
-                if not asset_filename_part:
-                    print_error(f"Combinación SO/arquitectura no soportada para descarga directa: {os_type}/{arch}")
+                if not download_url:
+                    print_error(f"No se encontró un asset de descarga compatible para {asset_filename_part} en la última release.")
                 else:
-                    download_url = None
-                    found_asset_name = ""
-                    for asset in assets:
-                        name = asset.get("name", "").lower()
-                        # Los nombres de assets son como: supabase_1.164.0_darwin_arm64.tar.gz
-                        # o supabase_windows_amd64.zip (sin versión en el nombre a veces)
-                        # Necesitamos un match flexible que contenga la parte os-arch y la extensión
-                        if asset_filename_part in name and name.endswith(asset_ext):
-                            download_url = asset.get("browser_download_url")
-                            found_asset_name = name
-                            print_success(f"Asset encontrado para descarga: {found_asset_name}")
-                            break
+                    print_info(f"Descargando Supabase CLI desde: {download_url}")
+                    temp_dir = "temp_supabase_cli_download"
+                    os.makedirs(temp_dir, exist_ok=True)
+                    download_path = os.path.join(temp_dir, found_asset_name)
 
-                    if not download_url:
-                        print_error(f"No se encontró un asset de descarga compatible para {asset_filename_part} en la última release.")
-                    else:
-                        print_info(f"Descargando Supabase CLI desde: {download_url}")
-                        temp_dir = "temp_supabase_cli_download"
-                        os.makedirs(temp_dir, exist_ok=True)
-                        download_path = os.path.join(temp_dir, found_asset_name) # Usar el nombre encontrado
+                    try:
+                        urllib.request.urlretrieve(download_url, download_path)
+                        print_success(f"Descargado en: {download_path}")
 
-                        try:
-                            urllib.request.urlretrieve(download_url, download_path)
-                            print_success(f"Descargado en: {download_path}")
+                        print_info("Extrayendo binario...")
+                        extracted_bin_path = None
+                        if asset_ext == ".zip":
+                            with zipfile.ZipFile(download_path, 'r') as zip_ref:
+                                for member_info in zip_ref.infolist():
+                                    if member_info.filename.lower().endswith(exe_name.lower()) and not member_info.is_dir():
+                                        zip_ref.extract(member_info, temp_dir)
+                                        extracted_bin_path = os.path.join(temp_dir, member_info.filename)
+                                        break
+                        elif asset_ext == ".tar.gz":
+                            with tarfile.open(download_path, "r:gz") as tar_ref:
+                                for member_info in tar_ref.getmembers():
+                                    if member_info.name.lower().endswith(exe_name.lower()) and member_info.isfile():
+                                        tar_ref.extract(member_info, temp_dir)
+                                        extracted_bin_path = os.path.join(temp_dir, member_info.name)
+                                        break
 
-                            print_info("Extrayendo binario...")
-                            extracted_bin_path = None
-                            if asset_ext == ".zip":
-                                with zipfile.ZipFile(download_path, 'r') as zip_ref:
-                                    for member_info in zip_ref.infolist(): # Usar infolist para verificar si es un archivo
-                                        if member_info.filename.lower().endswith(exe_name.lower()) and not member_info.is_dir():
-                                            zip_ref.extract(member_info, temp_dir)
-                                            extracted_bin_path = os.path.join(temp_dir, member_info.filename)
-                                            break
-                            elif asset_ext == ".tar.gz":
-                                with tarfile.open(download_path, "r:gz") as tar_ref:
-                                    for member_info in tar_ref.getmembers():
-                                        if member_info.name.lower().endswith(exe_name.lower()) and member_info.isfile():
-                                            tar_ref.extract(member_info, temp_dir)
-                                            extracted_bin_path = os.path.join(temp_dir, member_info.name)
-                                            break
+                        if not extracted_bin_path or not os.path.exists(extracted_bin_path):
+                            print_error("No se pudo extraer o encontrar el binario de Supabase CLI del archivo descargado.")
+                        else:
+                            print_success(f"Binario extraído en: {extracted_bin_path}")
 
-                            if not extracted_bin_path or not os.path.exists(extracted_bin_path):
-                                print_error("No se pudo extraer o encontrar el binario de Supabase CLI del archivo descargado.")
+                            if platform.system() == "Windows":
+                                install_dir_base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+                                install_dir_path = os.path.join(install_dir_base, "Supabase", "CLI")
                             else:
-                                print_success(f"Binario extraído en: {extracted_bin_path}")
+                                install_dir_path = os.path.join(os.path.expanduser("~"), ".supabase", "bin")
 
-                                if platform.system() == "Windows":
-                                    install_dir_base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
-                                    install_dir_path = os.path.join(install_dir_base, "Supabase", "CLI")
-                                else: # Linux/macOS
-                                    install_dir_path = os.path.join(os.path.expanduser("~"), ".supabase", "bin")
+                            os.makedirs(install_dir_path, exist_ok=True)
+                            final_bin_path = os.path.join(install_dir_path, exe_name)
 
-                                os.makedirs(install_dir_path, exist_ok=True)
-                                final_bin_path = os.path.join(install_dir_path, exe_name)
+                            try:
+                                # shutil.move puede fallar si el destino existe y es un directorio en algunas plataformas
+                                # o si los permisos son un problema. Copiar y luego borrar es más seguro.
+                                if os.path.exists(final_bin_path):
+                                    print_warning(f"El archivo existente {final_bin_path} será reemplazado.")
+                                    os.remove(final_bin_path)
+                                shutil.copy(extracted_bin_path, final_bin_path)
+                                print_success(f"Supabase CLI copiada a: {final_bin_path}")
+                                if os_type != "windows":
+                                    os.chmod(final_bin_path, os.stat(final_bin_path).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH )
+                                    print_info(f"Permisos de ejecución establecidos para {final_bin_path}")
 
-                                try:
-                                    shutil.move(extracted_bin_path, final_bin_path)
-                                    print_success(f"Supabase CLI movida a: {final_bin_path}")
-                                    if os_type != "windows":
-                                        os.chmod(final_bin_path, os.stat(final_bin_path).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH )
-                                        print_info(f"Permisos de ejecución establecidos para {final_bin_path}")
+                                print_warning(f"Supabase CLI ha sido instalada en: {install_dir_path}")
+                                print_warning(f"DEBES AÑADIR ESTE DIRECTORIO A TU VARIABLE DE ENTORNO PATH MANUALMENTE.")
+                                print_warning("Después de añadirlo al PATH, reinicia tu terminal/PC para que los cambios surtan efecto.")
 
-                                    print_warning(f"Supabase CLI ha sido instalada en: {install_dir_path}")
-                                    print_warning(f"DEBES AÑADIR ESTE DIRECTORIO A TU VARIABLE DE ENTORNO PATH MANUALMENTE.")
-                                    print_warning("Después de añadirlo al PATH, reinicia tu terminal/PC para que los cambios surtan efecto.")
+                                print_info(f"Verificando la instalación en {final_bin_path}...")
+                                if run_command([final_bin_path, "--version"], suppress_output=False)[0]:
+                                    print_success("¡Supabase CLI instalada y verificada exitosamente desde GitHub!")
+                                    print_info(f"Recuerda añadir '{install_dir_path}' a tu PATH.")
+                                    return True
+                                else:
+                                    print_error("Falló la verificación de Supabase CLI después de la descarga directa.")
+                            except Exception as move_err:
+                                print_error(f"No se pudo mover/copiar el binario a {final_bin_path}: {move_err}")
+                    except urllib.error.URLError as e:
+                         print_error(f"Error de red al descargar el asset: {e.reason}")
+                    except Exception as e:
+                         print_error(f"Error durante la descarga o extracción del asset: {e}")
+                    finally:
+                        if 'temp_dir' in locals() and os.path.exists(temp_dir): shutil.rmtree(temp_dir)
 
-                                    print_info(f"Verificando la instalación en {final_bin_path}...")
-                                    if run_command([final_bin_path, "--version"], suppress_output=False)[0]:
-                                        print_success("¡Supabase CLI instalada y verificada exitosamente desde GitHub!")
-                                        print_info(f"Recuerda añadir '{install_dir_path}' a tu PATH.")
-                                        return True
-                                    else:
-                                        print_error("Falló la verificación de Supabase CLI después de la descarga directa.")
-                                except Exception as move_err:
-                                    print_error(f"No se pudo mover el binario a {final_bin_path}: {move_err}")
-                        except urllib.error.URLError as e:
-                             print_error(f"Error de red al descargar el asset: {e.reason}")
-                        except Exception as e:
-                             print_error(f"Error durante la descarga o extracción del asset: {e}")
-                        finally:
-                            if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
-
-    except Exception as e: # Captura errores de la lógica de descarga principal
+    except Exception as e:
         print_error(f"Ocurrió un error general durante el proceso de descarga directa: {e}")
         if 'temp_dir' in locals() and os.path.exists(temp_dir) and os.path.isdir(temp_dir):
             shutil.rmtree(temp_dir)
@@ -496,5 +495,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-[end of supabase_setup.py]
