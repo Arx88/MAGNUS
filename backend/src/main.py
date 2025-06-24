@@ -172,5 +172,5 @@ if __name__ == '__main__':
     logger.info(f"Upload folder: {app.config['UPLOAD_FOLDER']}")
     
     # Ejecutar con SocketIO
-    socketio.run(app, host='0.0.0.0', port=5000, debug=app.config['DEBUG'])
+    socketio.run(app, host='0.0.0.0', port=5000, debug=app.config['DEBUG'], allow_unsafe_werkzeug=True)
 
