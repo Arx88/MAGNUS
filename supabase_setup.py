@@ -236,14 +236,14 @@ def check_supabase_cli(): # Modificado para devolver ruta, SUPABASE_IN_PATH o Fa
             if run_command(["supabase", "--version"], suppress_output=True)[0]:
                 print_success("¡Supabase CLI instalada y verificada exitosamente vía NPM!")
                 print_warning("Es posible que necesites REINICIAR TU TERMINAL (o VSCode) para que el PATH se actualice.")
-                    return SUPABASE_IN_PATH
+                return SUPABASE_IN_PATH
             else:
                 print_error("Supabase CLI no se encuentra después de la instalación con NPM.")
                 print_info("Esto es común si el directorio global de paquetes de NPM no está en tu PATH o si la terminal necesita reiniciarse.")
-                    return False # Fallo explícito
+                return False # Fallo explícito
         else:
             print_error("Falló la instalación con NPM.")
-                return False # Fallo explícito
+            return False # Fallo explícito
     else:
         print_info("NPM no está disponible en este sistema. Para usar este método, instala Node.js y NPM.")
 
