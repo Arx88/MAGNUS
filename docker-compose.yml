@@ -47,7 +47,7 @@ services:
   # Frontend React
   frontend:
     build:
-      context: ./frontend
+      context: ./manus-frontend
       dockerfile: Dockerfile
     container_name: manus-frontend
     environment:
