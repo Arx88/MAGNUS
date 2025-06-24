@@ -9,6 +9,7 @@ import urllib.request
 import zipfile
 import tarfile
 import stat # Para os.chmod
+import ctypes # Para verificar privilegios de administrador en Windows
 
 # Constantes
 SUPABASE_DIR = "supabase"
@@ -223,68 +224,51 @@ def check_supabase_cli():
 
             if os_type == "windows":
                 exe_name = "supabase.exe"
-                asset_ext = ".zip"
-                if arch in ["amd64", "x86_64"]: asset_identifier = "windows-amd64"
-                elif arch in ["arm64", "aarch64"]: asset_identifier = "windows-arm64"
+                asset_ext = ".tar.gz" # Cambiado de .zip a .tar.gz
+                if arch in ["amd64", "x86_64"]: asset_identifier = "windows_amd64" # Cambiado de windows-amd64
+                elif arch in ["arm64", "aarch64"]: asset_identifier = "windows_arm64" # Cambiado de windows-arm64
             elif os_type == "linux":
                 asset_ext = ".tar.gz"
-                if arch in ["amd64", "x86_64"]: asset_identifier = "linux-amd64"
-                elif arch in ["arm64", "aarch64"]: asset_identifier = "linux-arm64"
+                if arch in ["amd64", "x86_64"]: asset_identifier = "linux_amd64" # _ en lugar de -
+                elif arch in ["arm64", "aarch64"]: asset_identifier = "linux_arm64" # _ en lugar de -
             elif os_type == "darwin": # macOS
                 asset_ext = ".tar.gz"
-                if arch in ["amd64", "x86_64"]: asset_identifier = "darwin-amd64" # Intel Macs
-                elif arch in ["arm64", "aarch64"]: asset_identifier = "darwin-arm64" # Apple Silicon
+                if arch in ["amd64", "x86_64"]: asset_identifier = "darwin_amd64" # _ en lugar de -
+                elif arch in ["arm64", "aarch64"]: asset_identifier = "darwin_arm64" # _ en lugar de -
 
             if not asset_identifier:
                 print_error(f"Combinación SO/arquitectura no soportada para descarga directa: {os_type}/{arch}")
             else:
-                print_info(f"Buscando asset para: {asset_identifier}{asset_ext}")
+                # El nombre del asset suele ser supabase_{version}_{os}_{arch}{ext} o supabase_{os}_{arch}{ext}
+                # Ejemplo: supabase_2.26.9_windows_amd64.tar.gz o supabase_windows_amd64.tar.gz
+                # La clave es buscar "supabase_" seguido por el asset_identifier y la extensión.
+                # También puede haber una "v" antes de la versión.
+                print_info(f"Buscando asset que contenga 'supabase_' y '{asset_identifier}' y termine con '{asset_ext}'")
                 download_url = None
                 found_asset_name = ""
 
-                # Patrones de búsqueda más flexibles para el nombre del asset
-                # Ejemplo: supabase_1.2.3_windows_amd64.zip o supabase_cli_windows_amd64.zip
-                patterns_to_check = [
-                    f"supabase_cli_{asset_identifier}{asset_ext}", # Prioridad si existe con "cli"
-                    f"cli_{asset_identifier}{asset_ext}",
-                    f"supabase_{asset_identifier}{asset_ext}",
-                    f"{asset_identifier}{asset_ext}" # El más genérico
-                ]
-
                 for asset in assets:
                     name_lower = asset.get("name", "").lower()
-                    for pattern_part in [asset_identifier, f"_{asset_identifier}_", f"_{asset_identifier}-", f"-{asset_identifier}-", f"-{asset_identifier}_"]:
-                        if pattern_part in name_lower and name_lower.endswith(asset_ext):
-                            # Verificar si el nombre también contiene una parte de versión (ej. v1.2.3 o 1.2.3)
-                            # Esto es para dar preferencia a los assets que parecen más completos o específicos.
-                            # Esta lógica puede volverse compleja si los patrones de nombrado son muy variados.
-                            # Por ahora, un match simple es suficiente si el anterior es muy estricto.
-                            download_url = asset.get("browser_download_url")
-                            found_asset_name = asset.get("name")
-                            print_success(f"Asset encontrado para descarga: {found_asset_name}")
-                            break
-                    if download_url:
-                        break
+                    # Criterios de búsqueda:
+                    # 1. Debe contener "supabase_"
+                    # 2. Debe contener el asset_identifier (ej. "windows_amd64")
+                    # 3. Debe terminar con la asset_ext (ej. ".tar.gz")
+                    if "supabase_" in name_lower and \
+                       asset_identifier in name_lower and \
+                       name_lower.endswith(asset_ext):
 
-                # Fallback si la búsqueda más específica falla, intentamos con una más general
-                if not download_url:
-                    for asset in assets:
-                        name_lower = asset.get("name", "").lower()
-                        # Buscar solo por os_type y arch_name_in_asset y extensión
-                        # Esto es menos preciso pero puede capturar variaciones.
-                        # Ej: supabase_windows_amd64.zip o supabase_v1.164.0_windows_amd64.zip
-                        # La lógica anterior de asset_filename_part ya hacía esto de forma más simple.
-                        # Revertimos a una búsqueda más simple y directa como antes:
-                        # asset_filename_part ya se construyó como "windows-amd64", "linux-arm64", etc.
-                        if asset_identifier in name_lower and name_lower.endswith(asset_ext):
-                            download_url = asset.get("browser_download_url")
-                            found_asset_name = asset.get("name")
-                            print_success(f"Asset encontrado (búsqueda general): {found_asset_name}")
-                            break
+                        # Podría haber múltiples coincidencias si hay formatos antiguos o alternativos.
+                        # Damos preferencia a los que no tienen "checksum" o extensiones adicionales raras.
+                        if "checksums.txt" in name_lower or ".sig" in name_lower or ".pem" in name_lower:
+                            continue
 
+                        download_url = asset.get("browser_download_url")
+                        found_asset_name = asset.get("name")
+                        print_success(f"Asset encontrado para descarga: {found_asset_name}")
+                        break # Tomar el primero que coincida con los criterios principales
 
                 if not download_url:
-                    print_error(f"No se encontró un asset de descarga compatible para {asset_identifier} en la última release.")
+                    print_error(f"No se encontró un asset de descarga compatible para '{asset_identifier}' con extensión '{asset_ext}' en la última release.")
                 else:
                     print_info(f"Descargando Supabase CLI desde: {download_url}")
                     temp_dir = "temp_supabase_cli_download" # Nombre diferente para evitar colisiones
@@ -496,8 +480,23 @@ def apply_migrations(project_ref):
     else:
         return False
 
+def is_admin():
+    """Verifica si el script se está ejecutando con privilegios de administrador en Windows."""
+    if platform.system() == "Windows":
+        try:
+            return ctypes.windll.shell32.IsUserAnAdmin() != 0
+        except:
+            return False
+    return True # No es Windows, asumir que no se necesita o se maneja de otra forma
+
 def main():
     print_header("Script de Configuración de Supabase con CLI")
+
+    if platform.system() == "Windows" and not is_admin():
+        print_error("Este script necesita privilegios de administrador para intentar instalar algunas herramientas como Scoop.")
+        print_warning("Por favor, cierra esta ventana y vuelve a ejecutar el script como Administrador.")
+        input("Presiona Enter para salir...") # Pausa para que el usuario pueda leer el mensaje
+        return
 
     if not check_supabase_cli():
         return
