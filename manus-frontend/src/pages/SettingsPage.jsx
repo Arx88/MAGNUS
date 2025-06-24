@@ -289,7 +289,7 @@ export default function SettingsPage() {
           <TabsTrigger value="appearance">Apariencia</TabsTrigger>
           <TabsTrigger value="privacy">Privacidad</TabsTrigger>
           <TabsTrigger value="api">API Keys</TabsTrigger>
-        </Tabs>
+        </TabsList>
 
         {/* Profile Tab */}
         <TabsContent value="profile" className="space-y-6">
