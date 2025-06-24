@@ -34,10 +34,24 @@ python setup.py
 ✅ Node.js y dependencias  
 ✅ Python y librerías  
 ✅ Ollama y modelos IA  
-✅ Base de datos PostgreSQL  
+✅ Base de datos PostgreSQL (local para desarrollo, ver sección Supabase)
 ✅ Todas las configuraciones  
 ✅ Scripts de inicio  
 ✅ Acceso directo en escritorio  
+
+### Configuración de Supabase (Importante)
+
+Este proyecto utiliza Supabase como backend de base de datos en producción o para una configuración más robusta. Después de la instalación general, necesitarás configurar tu instancia de Supabase.
+
+1.  **Crea un proyecto en [Supabase](https://supabase.com/).**
+2.  **Obtén la URL de tu proyecto y la clave de API anónima.** Las encontrarás en la configuración de API de tu proyecto Supabase.
+3.  **Ejecuta el script de configuración de Supabase:**
+    ```bash
+    python supabase_setup.py
+    ```
+    Este script te pedirá la URL y la clave API, y luego intentará ejecutar el script `supabase_init.sql` para configurar las tablas y estructuras necesarias en tu base de datos Supabase.
+
+    **Nota:** El script `supabase_setup.py` intenta ejecutar las sentencias SQL. Sin embargo, debido a las limitaciones para ejecutar scripts SQL complejos directamente desde el cliente Python de Supabase, **es crucial que verifiques manualmente en el editor SQL de tu panel de Supabase que todas las tablas y configuraciones de `supabase_init.sql` se hayan aplicado correctamente.**
 
 ### Instalación Paso a Paso (Alternativa)
 
