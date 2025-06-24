@@ -947,7 +947,7 @@ class ManusInstaller:
         pre_check_success, pre_check_stdout, pre_check_stderr, _ = self.run_command("ollama --version", "Verificación previa de Ollama", timeout=20)
         
         if pre_check_success:
-            ollama_version = self._extract_version(pre_check_stdout)
+            ollama_version = self.dep_checker._extract_version(pre_check_stdout)
             if ollama_version != "unknown" and ollama_version.strip():
                 print(f"   {Colors.OKGREEN}✅ Ollama ya está instalado y funcionando. Versión: {ollama_version}{Colors.ENDC}")
                 self.logger.info(f"Ollama ya instalado (versión {ollama_version}). Saltando instalación.")
@@ -1020,7 +1020,7 @@ class ManusInstaller:
                 verify_success, verify_stdout, verify_stderr, _ = self.run_command("ollama --version", timeout=20)
 
                 if verify_success:
-                    ollama_version = self._extract_version(verify_stdout)
+                    ollama_version = self.dep_checker._extract_version(verify_stdout)
                     print(f"   {Colors.OKGREEN}✅ Ollama verificado y funcionando. Versión: {ollama_version}{Colors.ENDC}")
                     return True
                 else:
