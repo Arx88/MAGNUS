@@ -9,6 +9,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { Zap, Bot, Loader2, Eye, EyeOff } from 'lucide-react'
 
 export default function LoginPage() {
+  console.log('[LoginPage] Component function executing / mounting.');
   const { login, register } = useAuth()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -97,6 +98,7 @@ export default function LoginPage() {
     setError('')
   }
 
+  console.log('[LoginPage] About to return JSX. Current local state:', { loading, error, activeTab });
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-accent/20 p-4">
       <div className="w-full max-w-md space-y-8">

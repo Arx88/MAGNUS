@@ -14,25 +14,37 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [token, setToken] = useState(localStorage.getItem('auth_token'))
+  const initialToken = localStorage.getItem('auth_token');
+  const [token, setToken] = useState(initialToken)
+  console.log('[AuthContext] Initial token from localStorage:', initialToken);
 
   useEffect(() => {
+    console.log('[AuthContext] useEffect triggered. Current token state:', token);
     const initAuth = async () => {
+      console.log('[AuthContext] initAuth started.');
       if (token) {
+        console.log('[AuthContext] Token exists, attempting to get current user.');
         try {
           const userData = await authService.getCurrentUser()
+          console.log('[AuthContext] getCurrentUser success:', userData);
           setUser(userData)
         } catch (error) {
-          console.error('Auth initialization failed:', error)
+          console.error('[AuthContext] Auth initialization failed (getCurrentUser error):', error)
           localStorage.removeItem('auth_token')
-          setToken(null)
+          setToken(null) // This will re-trigger useEffect
+          console.log('[AuthContext] Token removed due to error.');
         }
+      } else {
+        console.log('[AuthContext] No token, skipping getCurrentUser.');
       }
+      console.log('[AuthContext] Setting loading to false.');
       setLoading(false)
     }
 
     initAuth()
   }, [token])
+
+  console.log('[AuthContext] Rendering AuthProvider. State: ', { user, token, loading });
 
   const login = async (credentials) => {
     try {

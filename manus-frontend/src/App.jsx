@@ -28,7 +28,10 @@ function AppContent() {
   const { user, loading } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
+  console.log('[AppContent] Rendering. Auth state:', { user, loading });
+
   if (loading) {
+    console.log('[AppContent] Auth loading is true, rendering spinner.');
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
@@ -37,9 +40,11 @@ function AppContent() {
   }
 
   if (!user) {
+    console.log('[AppContent] User not authenticated (or user is null), rendering LoginPage.');
     return <LoginPage />
   }
 
+  console.log('[AppContent] User authenticated, rendering main app layout.');
   return (
     <div className="flex h-screen bg-background">
       <Sidebar open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
