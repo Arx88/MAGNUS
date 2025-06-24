@@ -61,10 +61,13 @@ Este proyecto utiliza Supabase como backend de base de datos en producción o pa
     **¿Qué hace el script `supabase_setup.py`?**
     *   Verifica si la Supabase CLI está instalada.
         *   Si no está instalada, te preguntará si deseas que intente una instalación automática.
-        *   Si aceptas, el script intentará los siguientes métodos en secuencia (principalmente para Windows, NPM también es multiplataforma):
-            1.  **Winget (Windows):** Intenta actualizar fuentes, buscar `Supabase.SupabaseCLI` e instalarlo. Verifica el éxito examinando la salida del comando.
-            2.  **Scoop (Windows/Otros):** Si Winget falla o no aplica, intenta instalar `supabase` usando `scoop install supabase`.
-            3.  **NPM (Multiplataforma):** Si los métodos anteriores fallan, intenta instalar `supabase` globalmente usando `npm install supabase --global`.
+        *   Si aceptas, el script intentará los siguientes métodos en secuencia:
+            1.  **Winget (Solo Windows):** Intenta actualizar fuentes, buscar `Supabase.SupabaseCLI` e instalarlo. Verifica el éxito.
+            2.  **Scoop (Solo Windows):** Si Winget falla o no está disponible, el script verificará si Scoop está instalado.
+                *   Si Scoop no está instalado, te preguntará si deseas que intente instalarlo (esto implica cambiar políticas de ejecución de PowerShell y ejecutar un script de internet, con las debidas advertencias).
+                *   Si Scoop está (o se instala exitosamente), intentará `scoop install supabase`.
+            3.  **NPM (Multiplataforma):** Si los métodos anteriores fallan o no aplican, y si NPM está disponible, intentará instalar `supabase` globalmente (`npm install supabase --global`). El script no instalará Node.js/NPM.
+            4.  **Descarga Directa desde GitHub (Multiplataforma):** Como último recurso, si todos los métodos anteriores fallan, el script ofrecerá descargar la última versión de Supabase CLI directamente desde sus releases en GitHub. La extraerá y la colocará en un subdirectorio (`supabase_cli_installed_by_script` o similar en tu perfil de usuario). En este caso, **deberás añadir manualmente este directorio a tu variable de entorno PATH** y reiniciar tu terminal.
     *   Verifica que hayas iniciado sesión en la Supabase CLI (una vez que la CLI está disponible).
     *   Se asegura de que el directorio actual esté configurado como un proyecto Supabase local (ejecutando `supabase init` si es necesario y lo apruebas).
     *   Te pide el `PROJECT_REF` de tu proyecto Supabase (si no puede encontrarlo en `supabase/config.toml`).
