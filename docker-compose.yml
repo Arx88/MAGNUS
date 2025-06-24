@@ -13,8 +13,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./config/supabase_init.sql:/docker-entrypoint-initdb.d/01-init.sql
-      - ./config/initial_data.sql:/docker-entrypoint-initdb.d/02-data.sql
+      - ./config/supabase_init.sql:/docker-entrypoint-initdb.d/01-init.sql # Ensure this path is correct relative to docker-compose.yml
+      - ./config/initial_data.sql:/docker-entrypoint-initdb.d/02-data.sql # Ensure this path is correct
     networks:
       - manus-network
     restart: unless-stopped
@@ -29,13 +29,18 @@ services:
       - FLASK_ENV=production
       - DATABASE_URL=postgresql://manus_user:manus_password_2024@postgres:5432/manus_db
       - OLLAMA_HOST=host.docker.internal:11434
-      - SECRET_KEY=manus_secret_key_2024_super_secure
+      - SECRET_KEY=manus_secret_key_2024_super_secure # Strongly recommend changing this for any non-local setup
       - CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+      # --- ADDED/UPDATED SUPABASE VARIABLES ---
+      - SUPABASE_URL=https://nhtllunnqhgccrqjwbwz.supabase.co
+      - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5odGxsdW5ucWhnY2NycWp3Ynd6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA3NzQzMjIsImV4cCI6MjA2NjM1MDMyMn0.Q4rtMUueKXekMJgYl3CU_UqCoxkLnWGuebeOIF_pNww
+      - SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5odGxsdW5ucWhnY2NycWp3Ynd6Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MDc3NDMyMiwiZXhwIjoyMDY2MzUwMzIyfQ.vG5jH0dwVOV7a3Z5QG-Db-TUdGIw_ipiAElbiTM2Hv8
+      # ------------------------------------------
     ports:
       - "5000:5000"
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
+      - ./data:/app/data # Ensure this path is correct
+      - ./logs:/app/logs # Ensure this path is correct
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - postgres
@@ -51,10 +56,10 @@ services:
       dockerfile: Dockerfile
     container_name: manus-frontend
     environment:
-      - REACT_APP_API_URL=http://localhost:5000
-      - REACT_APP_WS_URL=ws://localhost:5000
+      - REACT_APP_API_URL=http://localhost:5000 # This is for browser-to-backend communication
+      - REACT_APP_WS_URL=ws://localhost:5000   # This is for browser-to-backend communication
     ports:
-      - "3000:3000"
+      - "3000:3000" # Assuming your React app (or its server in the container) runs on port 3000
     depends_on:
       - backend
     networks:
@@ -81,8 +86,8 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./docker/nginx.conf:/etc/nginx/nginx.conf
-      - ./docker/ssl:/etc/nginx/ssl
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf # Ensure this path is correct
+      - ./docker/ssl:/etc/nginx/ssl # Ensure this path is correct and contains SSL certs if using HTTPS on Nginx
     depends_on:
       - frontend
       - backend
@@ -97,6 +102,6 @@ volumes:
 networks:
   manus-network:
     driver: bridge
-  mcp-network:
+  mcp-network: # Ensure this network is created externally if 'external: true' is used
     driver: bridge
     external: true
