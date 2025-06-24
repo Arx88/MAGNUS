@@ -9,11 +9,22 @@ import { useAuth } from '@/hooks/useAuth'
 import { Zap, Bot, Loader2, Eye, EyeOff } from 'lucide-react'
 
 export default function LoginPage() {
-  const { login, register } = useAuth()
+  const auth = useAuth(); // Get the whole context
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [activeTab, setActiveTab] = useState('login')
+
+  if (!auth || !auth.login || !auth.register) {
+    // This state should ideally not be reached if AppContent's checks are robust.
+    // Rendering a clear message helps if it does.
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-accent/20 p-4">
+        <div className="text-foreground">Auth Context not fully loaded for LoginPage...</div>
+      </div>
+    );
+  }
+  const { login, register } = auth; // Destructure after the check
 
   // Login form state
   const [loginForm, setLoginForm] = useState({
