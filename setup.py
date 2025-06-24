@@ -1136,13 +1136,15 @@ class ManusInstaller:
         
         try:
             # Actualizar pip primero
-            success, _, stderr = self.run_command(
+            # Correctly unpack 4 values
+            pip_success, pip_stdout, pip_stderr, pip_rc = self.run_command(
                 f"{sys.executable} -m pip install --upgrade pip",
                 "Actualizando pip"
             )
             
-            if not success:
-                print(f"   {Colors.WARNING}⚠️  Error actualizando pip: {stderr}{Colors.ENDC}")
+            if not pip_success: # Check pip_success
+                # Use pip_stderr for the error message
+                print(f"   {Colors.WARNING}⚠️  Error actualizando pip: {pip_stderr.strip() if pip_stderr else 'Unknown error'}{Colors.ENDC}")
             
             # Lista de dependencias
             dependencies = [
@@ -1164,17 +1166,19 @@ class ManusInstaller:
             progress = ProgressBar(len(dependencies), "Instalando paquetes Python")
             
             for dep in dependencies:
-                success, _, stderr = self.run_command(
+                # Correctly unpack 4 values
+                dep_success, dep_stdout, dep_stderr, dep_rc = self.run_command(
                     f"{sys.executable} -m pip install {dep}",
                     f"Instalando {dep}",
                     timeout=120
                 )
                 
-                if success:
+                if dep_success: # Check dep_success
                     progress.update(1, f"✅ {dep}")
                 else:
                     progress.update(1, f"❌ {dep}")
-                    self.logger.error(f"Error instalando {dep}: {stderr}")
+                    # Use dep_stderr for the error message
+                    self.logger.error(f"Error instalando {dep}: {dep_stderr.strip() if dep_stderr else 'Unknown error'}")
                 
                 time.sleep(0.1)
             
