@@ -207,116 +207,81 @@ class DependencyChecker:
     def __init__(self, logger: Logger):
         self.logger = logger
         self.dependencies = {
-            'python': {'min_version': '3.8', 'command': 'python --version'},
-            'docker': {'min_version': '20.0', 'command': 'docker --version'},
-            'docker-compose': {'min_version': '2.0', 'command': 'docker-compose --version'},
-            'node': {'min_version': '18.0', 'command': 'node --version'},
-            'npm': {'min_version': '8.0', 'command': 'npm --version'},
-            'git': {'min_version': '2.0', 'command': 'git --version'},
+            'python': {'min_version': '3.8', 'command': 'python --version', 'alt_command': None},
+            'docker': {'min_version': '20.0', 'command': 'docker --version', 'alt_command': None},
+            'docker-compose': {'min_version': '2.0', 'command': 'docker compose version', 'alt_command': 'docker-compose --version'}, # Try new command first
+            'node': {'min_version': '18.0', 'command': 'node --version', 'alt_command': None},
+            'npm': {'min_version': '8.0', 'command': 'npm --version', 'alt_command': None}, # Special handling for npm via node path is separate
+            'git': {'min_version': '2.0', 'command': 'git --version', 'alt_command': None},
         }
     
-    def check_dependency(self, name: str) -> Tuple[bool, str, str]:
-        """Verifica una dependencia específica"""
-        if name not in self.dependencies:
-            return False, "unknown", "Dependencia desconocida"
-        
-        dep = self.dependencies[name]
-        
+    def _try_command(self, command_str: str, name: str) -> Tuple[Optional[str], Optional[subprocess.CompletedProcess]]:
+        """Helper to run a command string and return version or None, and the process result."""
         try:
-            # Initial attempt
-            command_parts = dep['command'].split()
+            command_parts = command_str.split()
             result = subprocess.run(
                 command_parts,
                 capture_output=True,
                 text=True,
                 timeout=10,
-                # Add PATH to environment to help find commands, esp. on Windows after install
                 env=os.environ.copy()
             )
-            
             if result.returncode == 0:
                 version = self._extract_version(result.stdout)
-                # Ensure version is not "unknown" or empty if command succeeded
                 if version != "unknown" and version.strip():
-                    return True, version, "Instalado"
-                # If version extraction failed despite command success, log and treat as not found for safety
-                self.logger.warning(f"Comando para {name} exitoso pero no se pudo extraer la versión: {result.stdout}")
-                # Fall through to alternative methods if name is 'npm'
-
-            # If the first attempt failed (or version extraction failed for 'npm')
-            # and the dependency is 'npm', try finding it via node's path
-            if name == 'npm' and (result.returncode != 0 or version == "unknown" or not version.strip()):
-                self.logger.debug(f"Intento inicial para npm falló o no extrajo versión. Buscando npm via node.")
-                node_executable_path = shutil.which("node")
-                if node_executable_path:
-                    self.logger.debug(f"Node ejecutable encontrado en: {node_executable_path}")
-                    node_dir = Path(node_executable_path).parent
-                    npm_executable_name = "npm.cmd" if platform.system().lower() == "windows" else "npm"
-                    npm_path_via_node = node_dir / npm_executable_name
-
-                    if npm_path_via_node.exists() and npm_path_via_node.is_file():
-                        self.logger.debug(f"Probando npm en: {npm_path_via_node}")
-                        alt_command = [str(npm_path_via_node), "--version"]
-                        alt_result = subprocess.run(
-                            alt_command,
-                            capture_output=True,
-                            text=True,
-                            timeout=10,
-                            env=os.environ.copy()
-                        )
-                        if alt_result.returncode == 0:
-                            alt_version = self._extract_version(alt_result.stdout)
-                            if alt_version != "unknown" and alt_version.strip():
-                                self.logger.info(f"npm encontrado via node en {npm_path_via_node} con versión {alt_version}")
-                                return True, alt_version, "Instalado (via node)"
-                            else:
-                                self.logger.warning(f"npm via node exitoso pero no se pudo extraer la versión: {alt_result.stdout}")
-                    else:
-                        self.logger.debug(f"npm no encontrado en la ruta de node: {npm_path_via_node}")
-                else:
-                    self.logger.debug("Node ejecutable no encontrado, no se puede buscar npm via node.")
-
-            # If all attempts fail
-            return False, "0.0", "No encontrado"
-                
+                    return version, result
+            self.logger.debug(f"Comando '{command_str}' para {name} falló o no extrajo versión. RC: {result.returncode}. Stdout: {result.stdout.strip()}. Stderr: {result.stderr.strip()}")
+            return None, result
         except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError) as e:
-            self.logger.debug(f"Excepción verificando {name}: {e}")
-            # Try finding npm via node if a FileNotFoundError occurs for the direct 'npm' command
-            if name == 'npm' and isinstance(e, FileNotFoundError):
-                self.logger.debug(f"FileNotFoundError para npm. Buscando npm via node.")
-                node_executable_path = shutil.which("node")
-                if node_executable_path:
-                    self.logger.debug(f"Node ejecutable encontrado en: {node_executable_path}")
-                    node_dir = Path(node_executable_path).parent
-                    npm_executable_name = "npm.cmd" if platform.system().lower() == "windows" else "npm"
-                    npm_path_via_node = node_dir / npm_executable_name
+            self.logger.debug(f"Excepción para comando '{command_str}' verificando {name}: {e}")
+            return None, None
 
-                    if npm_path_via_node.exists() and npm_path_via_node.is_file():
-                        self.logger.debug(f"Probando npm en: {npm_path_via_node}")
-                        alt_command = [str(npm_path_via_node), "--version"]
-                        try:
-                            alt_result = subprocess.run(
-                                alt_command,
-                                capture_output=True,
-                                text=True,
-                                timeout=10,
-                                env=os.environ.copy()
-                            )
-                            if alt_result.returncode == 0:
-                                alt_version = self._extract_version(alt_result.stdout)
-                                if alt_version != "unknown" and alt_version.strip():
-                                    self.logger.info(f"npm encontrado via node (después de excepción) en {npm_path_via_node} con versión {alt_version}")
-                                    return True, alt_version, "Instalado (via node)"
-                                else:
-                                    self.logger.warning(f"npm via node exitoso (después de excepción) pero no se pudo extraer la versión: {alt_result.stdout}")
-                        except Exception as e_alt:
-                             self.logger.debug(f"Excepción verificando npm via node: {e_alt}")
+    def check_dependency(self, name: str) -> Tuple[bool, str, str]:
+        """Verifica una dependencia específica"""
+        if name not in self.dependencies:
+            return False, "unknown", "Dependencia desconocida"
+
+        dep_config = self.dependencies[name]
+
+        # Attempt primary command
+        version, result_primary = self._try_command(dep_config['command'], name)
+        if version:
+            return True, version, "Instalado"
+
+        # Attempt alternative command if specified and primary failed
+        if dep_config.get('alt_command'):
+            alt_version, result_alt = self._try_command(dep_config['alt_command'], name)
+            if alt_version:
+                return True, alt_version, f"Instalado (via {dep_config['alt_command'].split()[0]})"
+
+        # Special handling for npm if direct/alt commands failed
+        if name == 'npm':
+            self.logger.debug(f"Comandos directos/alternativos para npm fallaron o no aplicables. Buscando npm via node.")
+            node_executable_path = shutil.which("node") # Corrected indentation
+            if node_executable_path:
+                self.logger.debug(f"Node ejecutable encontrado en: {node_executable_path}")
+                node_dir = Path(node_executable_path).parent
+                npm_executable_name = "npm.cmd" if platform.system().lower() == "windows" else "npm"
+                npm_path_via_node = node_dir / npm_executable_name
+
+                if npm_path_via_node.exists() and npm_path_via_node.is_file():
+                    self.logger.debug(f"Probando npm en: {npm_path_via_node}")
+                    # Construct command string for _try_command helper
+                    npm_via_node_cmd_str = f"{str(npm_path_via_node)} --version"
+                    npm_via_node_version, _ = self._try_command(npm_via_node_cmd_str, "npm via node")
+
+                    if npm_via_node_version:
+                        self.logger.info(f"npm encontrado via node en {npm_path_via_node} con versión {npm_via_node_version}")
+                        return True, npm_via_node_version, "Instalado (via node)"
                     else:
-                        self.logger.debug(f"npm no encontrado en la ruta de node (después de excepción): {npm_path_via_node}")
+                        self.logger.warning(f"npm via node ({npm_path_via_node}) se ejecutó pero no se pudo extraer la versión.")
                 else:
-                    self.logger.debug("Node ejecutable no encontrado (después de excepción), no se puede buscar npm via node.")
+                    self.logger.debug(f"npm no encontrado en la ruta de node: {npm_path_via_node}")
+            else:
+                self.logger.debug("Node ejecutable no encontrado, no se puede buscar npm via node.")
 
-            return False, "0.0", "No encontrado"
+        # If all attempts fail for any dependency (including special npm handling if it fails)
+        return False, "0.0", "No encontrado"
     
     def _extract_version(self, output: str) -> str:
         """Extrae versión de la salida del comando"""
@@ -576,12 +541,12 @@ class ManusInstaller:
                     return True
 
                 if package_manager == 'winget':
-                    success, stdout, stderr = self.run_command(
+                    success, stdout, stderr, _ = self.run_command(
                         "winget install Docker.DockerDesktop --accept-package-agreements --accept-source-agreements",
                         "Instalando Docker Desktop con winget"
                     )
                 elif package_manager == 'choco':
-                    success, stdout, stderr = self.run_command(
+                    success, stdout, stderr, _ = self.run_command(
                         "choco install docker-desktop -y",
                         "Instalando Docker Desktop con Chocolatey"
                     )
@@ -594,7 +559,7 @@ class ManusInstaller:
                     if self.download_with_progress(url, installer_path, "Docker Desktop"):
                         # Note: Silent install for the official .exe can be tricky and might still show UAC.
                         # The --quiet flag is a common convention but not guaranteed for all installers.
-                        success, stdout, stderr = self.run_command(
+                        success, stdout, stderr, _ = self.run_command(
                             f'"{installer_path}" install --quiet', # The installer might have different silent flags e.g., /S, /quiet, --silent
                             "Instalando Docker Desktop (descarga manual)"
                         )
@@ -606,7 +571,7 @@ class ManusInstaller:
             
             elif system == 'darwin':  # macOS
                 if package_manager == 'brew':
-                    success, _, stderr = self.run_command(
+                    success, _, stderr, _ = self.run_command(
                         "brew install --cask docker",
                         "Instalando Docker con Homebrew"
                     )
@@ -618,12 +583,12 @@ class ManusInstaller:
                     
                     if self.download_with_progress(url, installer_path, "Docker Desktop"):
                         # Montar DMG e instalar
-                        success, _, stderr = self.run_command(
+                        success, _, stderr, _ = self.run_command(
                             f"hdiutil attach {installer_path}",
                             "Montando imagen Docker"
                         )
                         if success:
-                            success, _, stderr = self.run_command(
+                            success, _, stderr, _ = self.run_command(
                                 "cp -R /Volumes/Docker/Docker.app /Applications/",
                                 "Copiando Docker a Applications"
                             )
@@ -634,7 +599,7 @@ class ManusInstaller:
             else:  # Linux
                 if package_manager in ['apt', 'yum', 'dnf']:
                     # Usar script oficial de Docker
-                    success, _, stderr = self.run_command(
+                    success, _, stderr, _ = self.run_command(
                         "curl -fsSL https://get.docker.com | sh",
                         "Instalando Docker con script oficial"
                     )
@@ -649,7 +614,7 @@ class ManusInstaller:
                         self.run_command(f"usermod -aG docker {username}")
                 
                 elif package_manager == 'pacman':
-                    success, _, stderr = self.run_command(
+                    success, _, stderr, _ = self.run_command(
                         "pacman -S docker docker-compose --noconfirm",
                         "Instalando Docker con pacman"
                     )
@@ -662,7 +627,7 @@ class ManusInstaller:
                 
                 # Verificar instalación
                 time.sleep(5)
-                success, _, _ = self.run_command("docker --version", timeout=30)
+                success, _, _, _ = self.run_command("docker --version", timeout=30)
                 if success:
                     print(f"   {Colors.OKGREEN}✅ Docker verificado y funcionando{Colors.ENDC}")
                     return True
@@ -1156,7 +1121,9 @@ class ManusInstaller:
                 "python-dotenv==1.0.0",
                 "docker==6.1.3",
                 "websockets==11.0.3",
-                "pydantic==2.5.0",
+                # Changed pydantic version to one likely to have pre-built wheels for Python 3.13
+                # Supabase successfully installed pydantic 2.11.7 and its core wheel.
+                "pydantic~=2.11.0",
                 "python-multipart==0.0.6",
                 "bcrypt==4.1.2",
                 "pyjwt==2.8.0",
@@ -1208,7 +1175,8 @@ class ManusInstaller:
             try:
                 # Instalar dependencias con npm
                 print(f"   📦 Ejecutando npm install...")
-                success, stdout, stderr = self.run_command(
+                # Correctly unpack 4 values, even if return_code is not used here.
+                success, stdout, stderr, _ = self.run_command(
                     "npm install",
                     "Instalando dependencias npm",
                     timeout=300
@@ -1492,7 +1460,7 @@ echo "Sistema detenido."
             
             for model in models:
                 print(f"   📥 Descargando modelo {model}...")
-                success, stdout, stderr = self.run_command(
+                success, stdout, stderr, _ = self.run_command(
                     f"ollama pull {model}",
                     f"Descargando {model}",
                     timeout=600  # 10 minutos para descargas
@@ -1503,7 +1471,7 @@ echo "Sistema detenido."
                     print(f"   {Colors.OKGREEN}✅ Modelo {model} descargado{Colors.ENDC}")
                 else:
                     progress.update(1, f"❌ {model}")
-                    print(f"   {Colors.WARNING}⚠️  Error descargando {model}: {stderr}{Colors.ENDC}")
+                    print(f"   {Colors.WARNING}⚠️  Error descargando {model}: {stderr.strip() if stderr else 'Unknown error'}{Colors.ENDC}")
             
             return True
             
