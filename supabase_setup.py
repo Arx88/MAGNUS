@@ -10,8 +10,10 @@ import zipfile
 import tarfile
 import stat # Para os.chmod
 import ctypes # Para verificar privilegios de administrador en Windows
+import sys # Para sys.exit()
 
 # Constantes
+SUPABASE_IN_PATH = "supabase_found_in_path" # Constante para indicar que se usa la CLI del PATH
 SUPABASE_DIR = "supabase"
 MIGRATIONS_DIR = os.path.join(SUPABASE_DIR, "migrations")
 CONFIG_FILE_PATH = os.path.join(SUPABASE_DIR, "config.toml") # supabase/config.toml
@@ -34,11 +36,54 @@ def print_info(message):
 def print_warning(message):
     print(f"\n⚠️ WARNING: {message}")
 
-def run_command(command_list, timeout=60, check=True, suppress_output=False):
+def run_command(command_list, timeout=60, check=True, suppress_output=False, supabase_executable_path=None):
     """Ejecuta un comando de subprocess de forma segura y devuelve (éxito, stdout, stderr)."""
+    actual_command_list = list(command_list) # Copiar para poder modificarla
+
+    if supabase_executable_path and actual_command_list[0] == "supabase":
+        # Si se proporciona una ruta ejecutable y el comando es "supabase", usar la ruta.
+        # Esto es útil si supabase_executable_path es una ruta completa y command_list[0] es solo "supabase".
+        actual_command_list[0] = supabase_executable_path
+    elif supabase_executable_path and actual_command_list[0] != "supabase" and os.path.basename(actual_command_list[0]) == "supabase.exe":
+        # Si supabase_executable_path se pasó como el primer elemento de command_list directamente.
+        # No es necesario hacer nada, actual_command_list[0] ya es la ruta completa.
+        pass
+
+
+    # Asegurarse de que si el comando es una ruta directa (ej. resultado de check_supabase_cli),
+    # y los argumentos se pasaron por separado, se reconstruya correctamente.
+    # Esta situación se maneja mejor en el código que llama a run_command, asegurando
+    # que command_list[0] sea el ejecutable correcto.
+
+    # La lógica anterior es un poco redundante si las funciones que llaman a run_command
+    # ya construyen command_list con [ruta_completa_o_comando, arg1, arg2].
+    # Simplifiquemos: si supabase_executable_path se pasa Y el primer comando es "supabase",
+    # entonces reemplazamos "supabase" con supabase_executable_path.
+    # Si command_list[0] ya es una ruta completa, entonces supabase_executable_path no debería
+    # ser necesario o debería coincidir.
+
+    # Lógica simplificada:
+    # La función que llama a run_command es responsable de construir el inicio de command_list
+    # correctamente (sea "supabase" o "/path/to/supabase").
+    # supabase_executable_path en run_command es una conveniencia para el caso de que
+    # el código más antiguo siga llamando con ["supabase", "arg"] pero necesitemos sobreescribir "supabase".
+
+    # Re-simplificación de la lógica de `actual_command_list`
+    # Si el primer elemento de command_list es "supabase" Y supabase_executable_path está definido (y no es "supabase")
+    # entonces usamos supabase_executable_path como el comando.
+    # Sino, usamos command_list[0] como está.
+
+    cmd_to_run = list(command_list) # Copia de la lista original
+
+    if cmd_to_run[0] == "supabase" and supabase_executable_path and supabase_executable_path != "supabase":
+        cmd_to_run[0] = supabase_executable_path
+    # Si cmd_to_run[0] ya es una ruta completa (porque supabase_executable_path se usó para construirlo fuera),
+    # y supabase_executable_path también se pasa (y es igual), está bien.
+    # Si cmd_to_run[0] es una ruta completa y supabase_executable_path es None o "supabase", también está bien.
+
     try:
         process = subprocess.run(
-            command_list,
+            cmd_to_run, # Usar la lista procesada
             capture_output=True,
             text=True,
             check=check,
@@ -71,12 +116,13 @@ def run_command(command_list, timeout=60, check=True, suppress_output=False):
             print_error(f"Error inesperado al ejecutar {' '.join(command_list)}: {e}")
         return False, "", str(e)
 
-def check_supabase_cli():
+def check_supabase_cli(): # Modificado para devolver ruta, SUPABASE_IN_PATH o False
     print_info("Verificando Supabase CLI...")
+    # Usar run_command directamente, ya que supabase_executable_path no está definido aún en este punto.
     success, initial_stdout, initial_stderr = run_command(["supabase", "--version"], suppress_output=True)
     if success:
-        print_success("Supabase CLI ya está instalada.")
-        return True
+        print_success("Supabase CLI ya está instalada y en el PATH.")
+        return SUPABASE_IN_PATH
 
     print_warning("Supabase CLI no está instalada o no se encuentra en el PATH.")
 
@@ -115,13 +161,16 @@ def check_supabase_cli():
                     if run_command(["supabase", "--version"], suppress_output=True)[0]:
                         print_success("¡Supabase CLI instalada y verificada exitosamente vía Winget!")
                         print_warning("Es posible que necesites REINICIAR TU TERMINAL (o VSCode) para que el PATH se actualice.")
-                        return True
+                        return SUPABASE_IN_PATH
                     else:
                         print_error("Supabase CLI no se encuentra después de la instalación con Winget (aunque Winget indicó éxito).")
+                        return False # Fallo explícito
                 else:
                     print_error("Falló la instalación con Winget o no se confirmó el éxito en la salida.")
+                    return False # Fallo explícito
             else:
                 print_warning(f"Winget no pudo encontrar/confirmar el paquete '{package_id}'. (Search stdout: '{search_stdout}', stderr: '{search_stderr_search}')")
+                # No retornar False aquí, permite que otros métodos continúen
         else:
             print_info("Winget no está disponible en este sistema.")
 
@@ -168,11 +217,13 @@ def check_supabase_cli():
                 if run_command(["supabase", "--version"], suppress_output=True)[0]:
                     print_success("¡Supabase CLI instalada y verificada exitosamente vía Scoop!")
                     print_warning("Es posible que necesites REINICIAR TU TERMINAL (o VSCode) para que el PATH se actualice.")
-                    return True
+                    return SUPABASE_IN_PATH
                 else:
                     print_error("Supabase CLI no se encuentra después de la instalación con Scoop.")
+                    return False # Fallo explícito
             else:
                 print_error("Falló la instalación de Supabase CLI con Scoop.")
+                return False # Fallo explícito
 
     # 3. NPM (Multiplataforma)
     print_header("Intentando instalación con NPM")
@@ -185,12 +236,14 @@ def check_supabase_cli():
             if run_command(["supabase", "--version"], suppress_output=True)[0]:
                 print_success("¡Supabase CLI instalada y verificada exitosamente vía NPM!")
                 print_warning("Es posible que necesites REINICIAR TU TERMINAL (o VSCode) para que el PATH se actualice.")
-                return True
+                    return SUPABASE_IN_PATH
             else:
                 print_error("Supabase CLI no se encuentra después de la instalación con NPM.")
                 print_info("Esto es común si el directorio global de paquetes de NPM no está en tu PATH o si la terminal necesita reiniciarse.")
+                    return False # Fallo explícito
         else:
             print_error("Falló la instalación con NPM.")
+                return False # Fallo explícito
     else:
         print_info("NPM no está disponible en este sistema. Para usar este método, instala Node.js y NPM.")
 
@@ -327,34 +380,45 @@ def check_supabase_cli():
                                 print_warning("Después de añadirlo al PATH, reinicia tu terminal/PC para que los cambios surtan efecto.")
 
                                 print_info(f"Verificando la instalación en {final_bin_path}...")
-                                if run_command([final_bin_path, "--version"], suppress_output=False)[0]:
+                                verify_success, _, _ = run_command([final_bin_path, "--version"], suppress_output=False)
+                                if verify_success:
                                     print_success("¡Supabase CLI instalada y verificada exitosamente desde GitHub!")
                                     print_info(f"Recuerda añadir '{install_dir_path}' a tu PATH.")
-                                    return True
+                                    return final_bin_path # Devolver la ruta al binario
                                 else:
                                     print_error("Falló la verificación de Supabase CLI después de la descarga directa.")
+                                    return False # Fallo explícito
                             except Exception as move_err:
                                 print_error(f"No se pudo mover/copiar el binario a {final_bin_path}: {move_err}")
+                                return False # Fallo explícito
                     except urllib.error.URLError as e:
                          print_error(f"Error de red al descargar el asset: {e.reason}")
+                         return False # Fallo explícito
                     except Exception as e:
                          print_error(f"Error durante la descarga o extracción del asset: {e}")
+                         return False # Fallo explícito
                     finally:
                         if 'temp_dir' in locals() and os.path.exists(temp_dir): shutil.rmtree(temp_dir)
+                # Si no hay download_url o falla antes de la descarga
+                if not download_url: # Asegurarse de que si no hay URL, también es un fallo de este método.
+                    return False
+
 
     except Exception as e:
         print_error(f"Ocurrió un error general durante el proceso de descarga directa: {e}")
         if 'temp_dir' in locals() and os.path.exists(temp_dir) and os.path.isdir(temp_dir):
             shutil.rmtree(temp_dir)
+        return False # Fallo explícito
 
-    # Mensaje final si todos los métodos, incluyendo descarga directa, fallaron
-    print_error("Todos los métodos de instalación automática (incluyendo descarga directa) fallaron o fueron omitidos.")
+    # Mensaje final si todos los métodos fueron probados y fallaron (o se omitieron).
+    # Este return False es el último recurso si ninguna instalación tuvo éxito.
+    print_error("Todos los métodos de instalación automática probados fallaron o fueron omitidos.")
     print_info("Por favor, instala Supabase CLI manualmente: https://supabase.com/docs/guides/cli/getting-started")
     return False
 
-def check_supabase_login():
+def check_supabase_login(supabase_cmd="supabase"): # Añadir supabase_cmd
     print_info("Verificando estado de login en Supabase CLI...")
-    success, _, stderr = run_command(["supabase", "projects", "list"], suppress_output=True)
+    success, _, stderr = run_command([supabase_cmd, "projects", "list"], suppress_output=True, supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None)
     if success:
         print_success("Ya has iniciado sesión en Supabase CLI.")
         return True
@@ -366,17 +430,19 @@ def check_supabase_login():
             print_error(f"Error desconocido al verificar el estado de login. Detalle: {stderr}")
         return False
 
-def initialize_supabase_project_if_needed():
+def initialize_supabase_project_if_needed(supabase_cmd="supabase"):
     print_info("Verificando inicialización del proyecto Supabase local...")
     if not os.path.isdir(SUPABASE_DIR):
         print_warning(f"El directorio '{SUPABASE_DIR}' no existe.")
-        run_init = input(f"¿Deseas ejecutar 'supabase init' para inicializarlo ahora? (s/N): ").strip().lower()
+        # Usar supabase_cmd en el mensaje al usuario también
+        run_init_prompt = f"¿Deseas ejecutar '{os.path.basename(supabase_cmd)} init' para inicializarlo ahora? (s/N): "
+        run_init = input(run_init_prompt).strip().lower()
         if run_init == 's':
-            success, _, stderr = run_command(["supabase", "init"])
+            success, _, stderr = run_command([supabase_cmd, "init"], supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None)
             if success:
                 print_success(f"Proyecto Supabase inicializado localmente en el directorio '{SUPABASE_DIR}'.")
             else:
-                print_error(f"Error al ejecutar 'supabase init'. Detalle: {stderr}")
+                print_error(f"Error al ejecutar '{os.path.basename(supabase_cmd)} init'. Detalle: {stderr}")
                 return False
         else:
             print_error(f"El script no puede continuar sin un proyecto Supabase inicializado localmente (directorio '{SUPABASE_DIR}').")
@@ -428,9 +494,11 @@ def get_project_ref():
         return None
     return project_ref_input
 
-def link_project(project_ref):
+def link_project(project_ref, supabase_cmd="supabase"):
     print_info(f"Vinculando con el proyecto Supabase: {project_ref}...")
-    success, stdout, stderr = run_command(["supabase", "link", "--project-ref", project_ref])
+    # Usar os.path.basename(supabase_cmd) para mensajes si es una ruta larga
+    link_command_list = [supabase_cmd, "link", "--project-ref", project_ref]
+    success, stdout, stderr = run_command(link_command_list, supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None)
     if success:
         print_success(f"Proyecto vinculado exitosamente con {project_ref}.")
         return True
@@ -465,14 +533,15 @@ def create_migration_from_init_sql():
         print_error(f"No se pudo crear el archivo de migración: {e}")
         return False
 
-def apply_migrations(project_ref):
+def apply_migrations(project_ref, supabase_cmd="supabase"):
     print_info("Aplicando migraciones a la base de datos Supabase remota...")
     print_warning("Esto puede tardar unos momentos y aplicará CUALQUIER migración pendiente.")
 
-    command = ["supabase", "db", "push"]
+    command_list = [supabase_cmd, "db", "push"]
 
-    print_info(f"Ejecutando: {' '.join(command)} para el proyecto {project_ref}")
-    success, _, stderr = run_command(command, timeout=180, suppress_output=False)
+    # Usar os.path.basename(supabase_cmd) para mensajes si es una ruta larga
+    print_info(f"Ejecutando: {os.path.basename(supabase_cmd)} db push para el proyecto {project_ref}")
+    success, _, stderr = run_command(command_list, timeout=180, suppress_output=False, supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None)
 
     if success:
         print_success("Migraciones aplicadas exitosamente (o no había cambios pendientes).")
@@ -495,23 +564,34 @@ def main():
     if platform.system() == "Windows" and not is_admin():
         print_error("Este script necesita privilegios de administrador para intentar instalar algunas herramientas como Scoop.")
         print_warning("Por favor, cierra esta ventana y vuelve a ejecutar el script como Administrador.")
-        input("Presiona Enter para salir...") # Pausa para que el usuario pueda leer el mensaje
+        sys.exit(1) # Salir con código de error
+
+    cli_status_or_path = check_supabase_cli() # Puede devolver SUPABASE_IN_PATH, False, o una ruta de string
+
+    supabase_executable_to_use = "supabase" # Por defecto, usa el comando del PATH
+
+    if isinstance(cli_status_or_path, str):
+        if cli_status_or_path == SUPABASE_IN_PATH:
+            print_info("Usando Supabase CLI del PATH.")
+            supabase_executable_to_use = "supabase"
+        else: # Es una ruta directa al ejecutable
+            print_info(f"Usando Supabase CLI desde la ruta: {cli_status_or_path}")
+            supabase_executable_to_use = cli_status_or_path
+    elif not cli_status_or_path: # Es False o None
+        print_info("Saliendo del script porque Supabase CLI no está disponible o no se pudo instalar.")
+        return # Salir si la CLI no está lista
+
+    if not initialize_supabase_project_if_needed(supabase_executable_to_use):
         return
 
-    if not check_supabase_cli():
+    if not check_supabase_login(supabase_executable_to_use):
         return
 
-    if not initialize_supabase_project_if_needed():
-        return
-
-    if not check_supabase_login():
-        return
-
-    project_ref = get_project_ref()
+    project_ref = get_project_ref() # Esta función no ejecuta comandos de supabase
     if not project_ref:
         return
 
-    if not link_project(project_ref):
+    if not link_project(project_ref, supabase_executable_to_use):
         print_error("No se pudo asegurar el vínculo con el proyecto Supabase. Saliendo.")
         return
 
@@ -520,7 +600,7 @@ def main():
 
     confirm_apply = input(f"\n¿Estás listo para aplicar las migraciones (incluyendo '{INIT_SQL_FILE}') a tu proyecto Supabase '{project_ref}'? (s/N): ").strip().lower()
     if confirm_apply == 's':
-        if apply_migrations(project_ref):
+        if apply_migrations(project_ref, supabase_executable_to_use):
             print_success("¡Proceso de configuración de Supabase completado!")
             print_info("Recuerda verificar tu dashboard de Supabase para confirmar que todo está como esperas.")
         else:
