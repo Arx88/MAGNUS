@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import datetime
 import configparser # Para leer el project_id de config.toml
+import platform # Para detectar el sistema operativo
 
 # Constantes
 SUPABASE_DIR = "supabase"
@@ -62,11 +63,51 @@ def check_supabase_cli():
     if success:
         print_success("Supabase CLI está instalada.")
         return True
-    else:
-        print_error("Supabase CLI no está instalada o no se encuentra en el PATH.")
-        if "Comando no encontrado" not in stderr : print_info(f"Detalle: {stderr}")
-        print_info("Por favor, instala Supabase CLI siguiendo las instrucciones en: https://supabase.com/docs/guides/cli/getting-started")
-        return False
+
+    # Si no está instalada, intentar instalar con Winget en Windows
+    print_warning("Supabase CLI no está instalada o no se encuentra en el PATH.")
+    if platform.system() == "Windows":
+        print_info("Sistema operativo detectado: Windows.")
+        install_choice = input("¿Deseas intentar instalar Supabase CLI usando Winget? (s/N): ").strip().lower()
+        if install_choice == 's':
+            print_info("Intentando instalar Supabase CLI con Winget...")
+            # Winget puede requerir permisos de administrador, lo que podría fallar si el script no se ejecuta como tal.
+            # Los argumentos --accept-package-agreements y --accept-source-agreements son para instalaciones no interactivas.
+            winget_cmd = [
+                "winget", "install", "supabase.cli",
+                "--source", "winget",
+                "--accept-package-agreements",
+                "--accept-source-agreements"
+            ]
+            # Es importante no usar check=True aquí inicialmente para poder manejar el error de "winget no encontrado"
+            install_success, install_stdout, install_stderr = run_command(winget_cmd, timeout=300, check=False) # 5 minutos de timeout
+
+            if install_success:
+                print_success("Winget ejecutado. Verificando la instalación de Supabase CLI nuevamente...")
+                # Volver a verificar
+                success_after_install, _, _ = run_command(["supabase", "--version"], suppress_output=True)
+                if success_after_install:
+                    print_success("Supabase CLI instalada y verificada exitosamente.")
+                    return True
+                else:
+                    print_error("Supabase CLI aún no se encuentra después del intento de instalación con Winget.")
+                    print_info(f"Salida de Winget (stdout): {install_stdout}")
+                    print_info(f"Salida de Winget (stderr): {install_stderr}")
+            elif "Comando no encontrado: winget" in install_stderr:
+                print_error("Winget no está instalado o no se encuentra en el PATH.")
+                print_info("Puedes instalar Winget (App Installer) desde la Microsoft Store: ms-windows-store://pdp/?productid=9NBLGGH4NNS1")
+            else:
+                print_error("Falló la instalación de Supabase CLI con Winget.")
+                print_info(f"Salida de Winget (stdout): {install_stdout}")
+                print_info(f"Salida de Winget (stderr): {install_stderr}")
+        else:
+            print_info("Instalación con Winget omitida por el usuario.")
+
+    # Si no es Windows, o si la instalación con Winget falló o se omitió
+    if "Comando no encontrado" not in stderr and platform.system() != "Windows": # Muestra el detalle solo si no es por no encontrar el comando
+         print_info(f"Detalle del intento inicial: {stderr}")
+    print_info("Por favor, instala Supabase CLI manualmente siguiendo las instrucciones en: https://supabase.com/docs/guides/cli/getting-started")
+    return False
 
 def check_supabase_login():
     print_info("Verificando estado de login en Supabase CLI...")
