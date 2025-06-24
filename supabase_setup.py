@@ -77,7 +77,7 @@ def check_supabase_cli():
                 "winget", "install", "supabase.cli",
                 "--source", "winget",
                 "--accept-package-agreements",
-                "--accept-source-agreements"
+                "--accept-source-agreements"  # Corregido: agreementts -> agreements
             ]
             # Es importante no usar check=True aquí inicialmente para poder manejar el error de "winget no encontrado"
             install_success, install_stdout, install_stderr = run_command(winget_cmd, timeout=300, check=False) # 5 minutos de timeout
