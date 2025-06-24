@@ -60,11 +60,12 @@ Este proyecto utiliza Supabase como backend de base de datos en producción o pa
 
     **¿Qué hace el script `supabase_setup.py`?**
     *   Verifica si la Supabase CLI está instalada.
-        *   Si estás en Windows y no se encuentra, el script intentará:
-            1.  Actualizar las fuentes de `winget` (`winget source update`).
-            2.  Buscar el paquete `Supabase.SupabaseCLI` usando `winget search Supabase.SupabaseCLI`.
-            3.  Si la búsqueda es exitosa, te ofrecerá instalar la CLI usando `winget install Supabase.SupabaseCLI`. El script verifica la salida de Winget para confirmar una instalación exitosa (buscando "instalado correctamente" o "successfully installed").
-    *   Verifica que hayas iniciado sesión en la Supabase CLI.
+        *   Si no está instalada, te preguntará si deseas que intente una instalación automática.
+        *   Si aceptas, el script intentará los siguientes métodos en secuencia (principalmente para Windows, NPM también es multiplataforma):
+            1.  **Winget (Windows):** Intenta actualizar fuentes, buscar `Supabase.SupabaseCLI` e instalarlo. Verifica el éxito examinando la salida del comando.
+            2.  **Scoop (Windows/Otros):** Si Winget falla o no aplica, intenta instalar `supabase` usando `scoop install supabase`.
+            3.  **NPM (Multiplataforma):** Si los métodos anteriores fallan, intenta instalar `supabase` globalmente usando `npm install supabase --global`.
+    *   Verifica que hayas iniciado sesión en la Supabase CLI (una vez que la CLI está disponible).
     *   Se asegura de que el directorio actual esté configurado como un proyecto Supabase local (ejecutando `supabase init` si es necesario y lo apruebas).
     *   Te pide el `PROJECT_REF` de tu proyecto Supabase (si no puede encontrarlo en `supabase/config.toml`).
     *   Vincula tu proyecto local con tu proyecto Supabase remoto usando `supabase link`.
