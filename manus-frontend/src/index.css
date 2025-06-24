@@ -75,7 +75,7 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring opacity-50;
+    @apply border-border outline-ring;
   }
   body {
     @apply bg-background text-foreground;
