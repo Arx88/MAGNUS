@@ -74,9 +74,14 @@ def check_supabase_cli():
             # Winget puede requerir permisos de administrador, lo que podría fallar si el script no se ejecuta como tal.
             # Los argumentos --accept-package-agreements y --accept-source-agreements son para instalaciones no interactivas.
             print_info("Intentando actualizar las fuentes de Winget...")
-            update_success, _, update_stderr = run_command(["winget", "source", "update", "--now"], timeout=120, check=False)
+            # Eliminado --now ya que no es compatible con todas las versiones de winget (ej. v1.10.390)
+            update_success, _, update_stderr = run_command(["winget", "source", "update"], timeout=120, check=False)
             if not update_success:
-                print_warning(f"No se pudieron actualizar las fuentes de Winget (esto podría ser normal si ya están actualizadas o si hay problemas de red/permisos). Detalle: {update_stderr}")
+                # Analizar stderr para ver si el error es por el comando en sí o por otra cosa
+                if "No se reconoció el nombre del argumento" in update_stderr and "update" in update_stderr: # Ser más específico
+                     print_warning(f"Tu versión de 'winget source update' podría no funcionar como se esperaba o tener argumentos diferentes. Continuando...")
+                else:
+                     print_warning(f"No se pudieron actualizar las fuentes de Winget (esto podría ser normal si ya están actualizadas o si hay problemas de red/permisos). Detalle: {update_stderr}")
             else:
                 print_success("Fuentes de Winget actualizadas (o ya estaban al día).")
 
@@ -116,7 +121,7 @@ def check_supabase_cli():
                 "winget", "install", package_id_to_install,
                 "--source", "winget",
                 "--accept-package-agreements",
-                "--accept-source-agreements"
+                "--accept-source-agreements"  # Asegurado que está correcto
             ]
             install_success, install_stdout, install_stderr = run_command(winget_cmd, timeout=300, check=False)
 
