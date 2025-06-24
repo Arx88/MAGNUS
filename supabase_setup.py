@@ -39,15 +39,19 @@ def run_command(command_list, timeout=60, check=True, suppress_output=False):
             timeout=timeout
         )
         if not suppress_output:
-            if process.stdout: print_info(f"Salida de {' '.join(command_list)}:\n{process.stdout.strip()}")
-            if process.stderr: print_warning(f"Salida de error (puede ser informativa) de {' '.join(command_list)}:\n{process.stderr.strip()}")
+            # Imprimir stdout solo si no está vacío
+            if process.stdout and process.stdout.strip():
+                 print_info(f"Salida de {' '.join(command_list)}:\n{process.stdout.strip()}")
+            # Imprimir stderr solo si no está vacío
+            if process.stderr and process.stderr.strip():
+                 print_warning(f"Salida de error (puede ser informativa) de {' '.join(command_list)}:\n{process.stderr.strip()}")
         return True, process.stdout.strip(), process.stderr.strip()
     except subprocess.CalledProcessError as e:
         if not suppress_output:
             print_error(f"Error al ejecutar: {' '.join(command_list)}")
-            if e.stdout: print_info(f"Salida (stdout) del error: {e.stdout.strip()}")
-            if e.stderr: print_error(f"Salida (stderr) del error: {e.stderr.strip()}")
-        return False, e.stdout.strip() if e.stdout else "", e.stderr.strip()
+            if e.stdout and e.stdout.strip(): print_info(f"Salida (stdout) del error: {e.stdout.strip()}")
+            if e.stderr and e.stderr.strip(): print_error(f"Salida (stderr) del error: {e.stderr.strip()}")
+        return False, e.stdout.strip() if e.stdout else "", e.stderr.strip() if e.stderr else ""
     except FileNotFoundError:
         if not suppress_output:
             print_error(f"Comando no encontrado: {command_list[0]}. Asegúrate de que esté instalado y en el PATH.")
@@ -64,104 +68,95 @@ def check_supabase_cli():
         print_success("Supabase CLI está instalada.")
         return True
 
-    # Si no está instalada, intentar instalar con Winget en Windows
     print_warning("Supabase CLI no está instalada o no se encuentra en el PATH.")
     if platform.system() == "Windows":
         print_info("Sistema operativo detectado: Windows.")
         install_choice = input("¿Deseas intentar instalar Supabase CLI usando Winget? (s/N): ").strip().lower()
         if install_choice == 's':
             print_info("Intentando instalar Supabase CLI con Winget...")
-            # Winget puede requerir permisos de administrador, lo que podría fallar si el script no se ejecuta como tal.
-            # Los argumentos --accept-package-agreements y --accept-source-agreements son para instalaciones no interactivas.
+
             print_info("Intentando actualizar las fuentes de Winget...")
-            # Eliminado --now ya que no es compatible con todas las versiones de winget (ej. v1.10.390)
-            update_success, _, update_stderr = run_command(["winget", "source", "update"], timeout=120, check=False)
+            update_success, _, update_stderr = run_command(["winget", "source", "update"], timeout=120, check=False) # No check=True
             if not update_success:
-                # Analizar stderr para ver si el error es por el comando en sí o por otra cosa
-                if "No se reconoció el nombre del argumento" in update_stderr and "update" in update_stderr: # Ser más específico
+                # No es necesariamente un error crítico si update falla (ej. ya actualizado, sin red para msstore)
+                # pero sí si el comando 'update' en sí es inválido.
+                if "No se reconoció el nombre del argumento" in update_stderr and "update" in update_stderr : # Ser más específico
                      print_warning(f"Tu versión de 'winget source update' podría no funcionar como se esperaba o tener argumentos diferentes. Continuando...")
+                elif "Comando no encontrado: winget" in update_stderr: # Si winget no existe
+                    print_error("Winget no está instalado o no se encuentra en el PATH.")
+                    print_info("Puedes instalar Winget (App Installer) desde la Microsoft Store: ms-windows-store://pdp/?productid=9NBLGGH4NNS1")
+                    return False # No podemos continuar con winget si no existe
                 else:
                      print_warning(f"No se pudieron actualizar las fuentes de Winget (esto podría ser normal si ya están actualizadas o si hay problemas de red/permisos). Detalle: {update_stderr}")
             else:
                 print_success("Fuentes de Winget actualizadas (o ya estaban al día).")
 
             print_info("Buscando el paquete Supabase CLI con Winget...")
-            # Intentar buscar el paquete para confirmar su ID y disponibilidad
             search_cmd = ["winget", "search", "supabase.cli", "--source", "winget", "--accept-source-agreements"]
             search_success, search_stdout, search_stderr = run_command(search_cmd, timeout=120, check=False)
 
-            package_id_to_install = "supabase.cli" # ID por defecto
+            package_id_to_install = "supabase.cli"
             found_package = False
 
             if search_success and search_stdout:
-                # Analizar la salida de winget search. Ejemplo de salida esperada:
-                # Nombre         Id            Versión Fuente
-                # -------------------------------------------
-                # Supabase CLI supabase.cli 1.153.2 winget
                 lines = search_stdout.splitlines()
                 for line in lines:
-                    if "supabase.cli" in line.lower(): # Buscar el ID exacto o una línea que lo contenga
+                    if "supabase.cli" in line.lower():
                         parts = line.split()
                         if len(parts) >= 2 and parts[1].lower() == "supabase.cli":
-                            package_id_to_install = parts[1] # Confirmar el ID
+                            package_id_to_install = parts[1]
                             print_success(f"Paquete encontrado: {package_id_to_install} (Versión: {parts[2] if len(parts) > 2 else 'N/A'})")
                             found_package = True
                             break
                 if not found_package:
-                    print_warning("No se encontró 'supabase.cli' explícitamente en la búsqueda, pero se intentará la instalación con el ID por defecto.")
-                    # Esto podría pasar si la salida de search es inesperada o el paquete no está.
-            elif not search_success and "No se encontró ningún paquete coincidente con los criterios de entrada." in search_stderr:
+                    print_warning(f"No se encontró '{package_id_to_install}' explícitamente en la búsqueda de Winget. Se intentará la instalación con este ID por defecto.")
+            elif "No se encontró ningún paquete coincidente con los criterios de entrada." in search_stderr or \
+                 "No se encontró ningún paquete coincidente con los criterios de búsqueda" in search_stderr : # Variaciones del mensaje
                  print_warning(f"Winget search no encontró el paquete '{package_id_to_install}'. Se intentará instalar de todas formas.")
-            else: # Otro error en la búsqueda
-                print_warning(f"Error al buscar el paquete con Winget. Detalle (stdout): {search_stdout} (stderr): {search_stderr}. Se intentará instalar de todas formas.")
+            else:
+                print_warning(f"Comando 'winget search' no completado como se esperaba o devolvió un error. Detalle (stdout): '{search_stdout}' (stderr): '{search_stderr}'. Se intentará instalar de todas formas.")
 
-            # Proceder con la instalación
             print_info(f"Intentando instalar '{package_id_to_install}' con Winget...")
             winget_cmd = [
                 "winget", "install", package_id_to_install,
                 "--source", "winget",
                 "--accept-package-agreements",
-                "--accept-source-agreements"  # Corregido y re-verificado
+                "--accept-source-agreements"  # Corregido y verificado
             ]
             install_success, install_stdout, install_stderr = run_command(winget_cmd, timeout=300, check=False)
 
             if install_success:
-                # A veces winget install retorna 0 incluso si el paquete no se instaló realmente (ej. si no lo encontró pero no dio error)
-                # o si ya estaba instalado. La verdadera prueba es si el comando supabase --version funciona ahora.
-                print_success("Comando de instalación de Winget ejecutado. Verificando la instalación de Supabase CLI nuevamente...")
+                print_success("Comando de instalación de Winget parece haberse ejecutado (código de salida 0). Verificando la instalación de Supabase CLI...")
                 success_after_install, _, _ = run_command(["supabase", "--version"], suppress_output=True)
                 if success_after_install:
                     print_success("Supabase CLI instalada y verificada exitosamente.")
                     return True
                 else:
-                    print_error("Supabase CLI aún no se encuentra después del intento de instalación con Winget.")
-                    if "No se encontró ningún paquete coincidente con los criterios de búsqueda" in install_stdout or \
-                       "No se encontró ningún paquete coincidente con los criterios de búsqueda" in install_stderr:
-                        print_info("Winget reportó que no encontró el paquete durante la instalación.")
-                    else:
-                        print_info(f"Salida de Winget durante la instalación (stdout): {install_stdout}")
-                        print_info(f"Salida de Winget durante la instalación (stderr): {install_stderr}")
-            elif "Comando no encontrado: winget" in install_stderr: # run_command ahora maneja esto
-                print_error("Winget no está instalado o no se encuentra en el PATH.")
-                print_info("Puedes instalar Winget (App Installer) desde la Microsoft Store: ms-windows-store://pdp/?productid=9NBLGGH4NNS1")
-            else: # Otros errores de winget install
-                print_error(f"Falló la instalación de Supabase CLI con Winget. Código de error de Winget o comando no encontrado.")
-                print_info(f"Salida de Winget (stdout): {install_stdout}")
-                print_info(f"Salida de Winget (stderr): {install_stderr}")
+                    print_error("Supabase CLI aún no se encuentra después del intento de instalación con Winget, aunque 'winget install' retornó éxito.")
+                    print_info("Esto puede suceder si Winget ya lo consideraba instalado o si la instalación real falló silenciosamente.")
+                    print_info(f"Salida de Winget durante la instalación (stdout): {install_stdout}")
+                    print_info(f"Salida de Winget durante la instalación (stderr): {install_stderr}")
+            else: # winget install falló (código de salida distinto de 0)
+                print_error(f"Falló la instalación de Supabase CLI con Winget (winget install retornó un error).")
+                if "No se encontró ningún paquete coincidente con los criterios de búsqueda" in install_stdout or \
+                   "No se encontró ningún paquete coincidente con los criterios de búsqueda" in install_stderr:
+                    print_info("Winget reportó que no encontró el paquete durante la fase de instalación.")
+                else:
+                    print_info(f"Salida de Winget (stdout): {install_stdout}") # Ya se imprimen en run_command si no es suppress_output
+                    print_info(f"Salida de Winget (stderr): {install_stderr}") # Ya se imprimen en run_command si no es suppress_output
         else:
             print_info("Instalación con Winget omitida por el usuario.")
 
     # Mensaje final si todo lo anterior falla o no es Windows
-    # Evitar imprimir el stderr del primer `supabase --version` si ya se manejó el caso de winget.
-    if not (platform.system() == "Windows" and install_choice == 's'):
-        if "Comando no encontrado" not in stderr : print_info(f"Detalle del intento inicial: {stderr}")
+    current_stderr = stderr # Stderr del 'supabase --version' inicial
+    if not (platform.system() == "Windows" and 'install_choice' in locals() and install_choice == 's'):
+        if "Comando no encontrado" not in current_stderr : print_info(f"Detalle del intento inicial de 'supabase --version': {current_stderr}")
     print_info("Por favor, instala Supabase CLI manualmente siguiendo las instrucciones en: https://supabase.com/docs/guides/cli/getting-started")
     return False
 
 def check_supabase_login():
     print_info("Verificando estado de login en Supabase CLI...")
-    # "supabase projects list" requiere autenticación.
-    success, _, stderr = run_command(["supabase", "projects", "list"], suppress_output=True) # Suprimir salida normal, solo mostrar si hay error
+    success, _, stderr = run_command(["supabase", "projects", "list"], suppress_output=True)
     if success:
         print_success("Ya has iniciado sesión en Supabase CLI.")
         return True
@@ -175,7 +170,7 @@ def check_supabase_login():
 
 def initialize_supabase_project_if_needed():
     print_info("Verificando inicialización del proyecto Supabase local...")
-    if not os.path.isdir(SUPABASE_DIR): # Verificar si es un directorio
+    if not os.path.isdir(SUPABASE_DIR):
         print_warning(f"El directorio '{SUPABASE_DIR}' no existe.")
         run_init = input(f"¿Deseas ejecutar 'supabase init' para inicializarlo ahora? (s/N): ").strip().lower()
         if run_init == 's':
@@ -191,7 +186,6 @@ def initialize_supabase_project_if_needed():
     else:
         print_success(f"El directorio '{SUPABASE_DIR}' ya existe.")
 
-    # Asegurar que el directorio de migraciones exista
     if not os.path.isdir(MIGRATIONS_DIR):
         try:
             os.makedirs(MIGRATIONS_DIR, exist_ok=True)
@@ -206,41 +200,28 @@ def get_project_ref():
     if os.path.exists(CONFIG_FILE_PATH):
         try:
             config = configparser.ConfigParser()
-            # Asegurarse de que el archivo no esté vacío
             if os.path.getsize(CONFIG_FILE_PATH) > 0:
                 config.read(CONFIG_FILE_PATH)
-                # Supabase CLI v1.110.1 en adelante usa [project_id] sin comillas
-                # versiones anteriores podrían haberlo tenido como string literal.
-                # Intentamos leerlo como sección y como valor simple si falla.
                 project_id = None
-                if 'project_id' in config: # Como sección [project_id]
-                    project_id = config['project_id'].get('id', None) # Asumiendo [project_id]\nid = "xxx"
-
-                if not project_id and 'PROJECT' in config: # Como sección [PROJECT] (observado en algunos configs)
-                     project_id = config['PROJECT'].get('ref', None)
-
-
-                if not project_id: # Intentar leerlo como un valor simple si no es una sección
-                    # Esto es menos probable con configparser, pero por si acaso.
-                    # La estructura real de config.toml es:
-                    # project_id = "your-project-ref" (sin sección)
-                    # O más recientemente:
-                    # [project_id]
-                    # id = "your-project-ref"
-                    # Para el caso project_id = "xxx" sin sección, configparser lo leerá bajo DEFAULT si no hay secciones.
-                    # O si hay una sección por defecto que lo contenga.
-                    # Es más simple leer el archivo manualmente para este caso.
+                # Caso 1: [project_id]\nid = "xxx"
+                if 'project_id' in config and 'id' in config['project_id']:
+                    project_id = config['project_id']['id']
+                # Caso 2: project_id = "xxx" (sin sección, leído por configparser bajo DEFAULT si no hay otras secciones)
+                # O si está en una sección por defecto. Es más fiable leerlo manualmente si no está en [project_id].
+                if not project_id:
                     with open(CONFIG_FILE_PATH, 'r') as f_config:
                         for line in f_config:
-                            if line.strip().startswith('project_id'):
-                                project_id = line.split('=')[1].strip().replace('"', '')
-                                break
-
+                            line_strip = line.strip()
+                            if line_strip.startswith('project_id'): # Cubre project_id = "xxx" y project_id="xxx"
+                                parts = line_strip.split('=', 1)
+                                if len(parts) == 2:
+                                    project_id = parts[1].strip().replace('"', '').replace("'", "")
+                                    break
                 if project_id:
                     print_success(f"PROJECT_REF encontrado en '{CONFIG_FILE_PATH}': {project_id}")
                     return project_id
                 else:
-                    print_warning(f"No se pudo extraer 'project_id' de '{CONFIG_FILE_PATH}'. Formato inesperado.")
+                    print_warning(f"No se pudo extraer 'project_id' de '{CONFIG_FILE_PATH}' con los formatos esperados.")
             else:
                 print_warning(f"El archivo '{CONFIG_FILE_PATH}' está vacío.")
         except Exception as e:
@@ -259,15 +240,16 @@ def link_project(project_ref):
         print_success(f"Proyecto vinculado exitosamente con {project_ref}.")
         return True
     else:
-        # Supabase link puede fallar si ya está vinculado al mismo proyecto, lo cual no es un error crítico.
         if "already linked to project" in stderr.lower() and project_ref in stderr.lower():
             print_success(f"El proyecto ya está vinculado con {project_ref}. Continuando...")
             return True
         elif "config file differs" in stderr.lower():
              print_warning(f"El project ID en {CONFIG_FILE_PATH} difiere del proporcionado.")
              print_info("Por favor, resuelve esto manualmente o ejecuta 'supabase link --project-ref TU_PROJECT_ID --force' si es necesario.")
-             # Consideramos esto un fallo para el script automático.
-        print_error(f"Error al vincular el proyecto. Detalle: {stderr}")
+        # No imprimir error genérico si ya se manejó uno específico.
+        # run_command ya imprime los errores si no es suppress_output.
+        # Si llegamos aquí es porque el comando falló y no fue un "already linked".
+        # print_error(f"Error al vincular el proyecto. Detalle: {stderr}") # Redundante si run_command ya lo hizo
         return False
 
 def create_migration_from_init_sql():
@@ -276,7 +258,7 @@ def create_migration_from_init_sql():
         print_error(f"El archivo '{INIT_SQL_FILE}' no se encontró en el directorio actual.")
         return False
 
-    if not os.path.isdir(MIGRATIONS_DIR): # Doble check
+    if not os.path.isdir(MIGRATIONS_DIR):
         print_error(f"El directorio de migraciones '{MIGRATIONS_DIR}' no existe. Asegúrate de que 'supabase init' se haya ejecutado correctamente.")
         return False
 
@@ -299,13 +281,15 @@ def apply_migrations(project_ref):
     command = ["supabase", "db", "push"]
 
     print_info(f"Ejecutando: {' '.join(command)} para el proyecto {project_ref}")
-    success, _, stderr = run_command(command, timeout=180) # Timeout de 3 minutos
+    # No suprimir salida aquí, es importante para el usuario
+    success, _, stderr = run_command(command, timeout=180, suppress_output=False)
 
     if success:
         print_success("Migraciones aplicadas exitosamente (o no había cambios pendientes).")
         return True
     else:
-        print_error(f"Error al aplicar las migraciones. Detalle: {stderr}")
+        # run_command ya habrá impreso los detalles del error.
+        # print_error(f"Error al aplicar las migraciones. Detalle: {stderr}") # Redundante
         return False
 
 def main():
@@ -317,7 +301,6 @@ def main():
     if not initialize_supabase_project_if_needed():
         return
 
-    # El login es crucial antes de intentar obtener project_ref o linkear
     if not check_supabase_login():
         return
 
