@@ -49,9 +49,25 @@ Este proyecto utiliza Supabase como backend de base de datos en producción o pa
     ```bash
     python supabase_setup.py
     ```
-    Este script te pedirá la URL y la clave API, y luego intentará ejecutar el script `supabase_init.sql` para configurar las tablas y estructuras necesarias en tu base de datos Supabase.
+    Este script te guiará a través del proceso de configuración de tu base de datos Supabase utilizando la **Supabase CLI**.
 
-    **Nota:** El script `supabase_setup.py` intenta ejecutar las sentencias SQL. Sin embargo, debido a las limitaciones para ejecutar scripts SQL complejos directamente desde el cliente Python de Supabase, **es crucial que verifiques manualmente en el editor SQL de tu panel de Supabase que todas las tablas y configuraciones de `supabase_init.sql` se hayan aplicado correctamente.**
+    **Prerrequisitos para usar `supabase_setup.py`:**
+    1.  **Supabase CLI Instalada:** Debes tener la Supabase CLI instalada en tu sistema. Si no la tienes, sigue las instrucciones en [Supabase CLI Documentation](https://supabase.com/docs/guides/cli).
+    2.  **Login en Supabase CLI:** Debes haber iniciado sesión en la Supabase CLI usando el comando `supabase login` en tu terminal. El script verificará esto y te guiará si es necesario.
+    3.  **Archivo `supabase_init.sql`:** Asegúrate de que el archivo `supabase_init.sql` (que contiene el esquema inicial de la base de datos) esté presente en el directorio raíz del proyecto.
+
+    **¿Qué hace el script `supabase_setup.py`?**
+    *   Verifica que la Supabase CLI esté instalada y que hayas iniciado sesión.
+    *   Se asegura de que el directorio actual esté configurado como un proyecto Supabase local (ejecutando `supabase init` si es necesario y lo apruebas).
+    *   Te pide el `PROJECT_REF` de tu proyecto Supabase (si no puede encontrarlo en `supabase/config.toml`).
+    *   Vincula tu proyecto local con tu proyecto Supabase remoto usando `supabase link`.
+    *   Crea un nuevo archivo de migración en el directorio `supabase/migrations/` a partir del contenido de `supabase_init.sql`.
+    *   Te pide confirmación y luego ejecuta `supabase db push` para aplicar esta migración (y cualquier otra pendiente) a tu base de datos Supabase remota.
+    *   Te proporciona retroalimentación basada en la salida de los comandos de la Supabase CLI.
+
+    **Importante:**
+    *   El script interactuará con la Supabase CLI. Lee atentamente los mensajes y las confirmaciones que solicita.
+    *   Después de ejecutar el script, siempre es una buena práctica verificar tu dashboard de Supabase para confirmar que el esquema de la base de datos se haya aplicado correctamente.
 
 ### Instalación Paso a Paso (Alternativa)
 
