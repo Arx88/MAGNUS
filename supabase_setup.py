@@ -438,11 +438,16 @@ def initialize_supabase_project_if_needed(supabase_cmd="supabase"):
         run_init_prompt = f"¿Deseas ejecutar '{os.path.basename(supabase_cmd)} init' para inicializarlo ahora? (s/N): "
         run_init = input(run_init_prompt).strip().lower()
         if run_init == 's':
-            success, _, stderr = run_command([supabase_cmd, "init"], supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None)
+            # Aumentar timeout a 180s y añadir --force
+            success, _, stderr = run_command(
+                [supabase_cmd, "init", "--force"],
+                timeout=180,
+                supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None
+            )
             if success:
                 print_success(f"Proyecto Supabase inicializado localmente en el directorio '{SUPABASE_DIR}'.")
             else:
-                print_error(f"Error al ejecutar '{os.path.basename(supabase_cmd)} init'. Detalle: {stderr}")
+                print_error(f"Error al ejecutar '{os.path.basename(supabase_cmd)} init --force'. Detalle: {stderr}")
                 return False
         else:
             print_error(f"El script no puede continuar sin un proyecto Supabase inicializado localmente (directorio '{SUPABASE_DIR}').")
