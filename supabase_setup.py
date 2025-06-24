@@ -423,9 +423,16 @@ def check_supabase_login(supabase_cmd="supabase"): # Añadir supabase_cmd
         print_success("Ya has iniciado sesión en Supabase CLI.")
         return True
     else:
-        if "You are not logged in" in stderr or "Error: Unauthorized" in stderr or "Auth error" in stderr:
+        # Convertir stderr a minúsculas para hacer la comprobación insensible a mayúsculas/minúsculas
+        stderr_lower = stderr.lower()
+        if "you are not logged in" in stderr_lower or \
+           "error: unauthorized" in stderr_lower or \
+           "auth error" in stderr_lower or \
+           "access token not provided" in stderr_lower:
             print_warning("No has iniciado sesión en Supabase CLI.")
-            print_info("Por favor, ejecuta 'supabase login' en tu terminal y luego vuelve a ejecutar este script.")
+            # Usar os.path.basename(supabase_cmd) para el mensaje si es una ruta larga
+            login_command_display = os.path.basename(supabase_cmd)
+            print_info(f"Por favor, ejecuta '{login_command_display} login' en tu terminal y luego vuelve a ejecutar este script.")
         else:
             print_error(f"Error desconocido al verificar el estado de login. Detalle: {stderr}")
         return False
