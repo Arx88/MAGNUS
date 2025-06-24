@@ -1353,7 +1353,7 @@ echo Esperando a que Ollama este listo...
 timeout /t 5 /nobreak >nul
 
 echo Descargando modelo por defecto...
-ollama pull llama2
+ollama pull llama3.1:8b
 
 echo Iniciando servicios...
 docker-compose up -d
@@ -1402,7 +1402,7 @@ sleep 5
 
 # Descargar modelo por defecto
 echo "Descargando modelo por defecto..."
-ollama pull llama2
+ollama pull llama3.1:8b
 
 # Iniciar servicios
 echo "Iniciando servicios..."
@@ -1454,7 +1454,7 @@ echo "Sistema detenido."
             time.sleep(3)
             
             # Modelos básicos
-            models = ["llama2"]  # Solo el modelo básico para empezar
+            models = ["llama3.1:8b"]  # Solo el modelo básico para empezar
             
             progress = ProgressBar(len(models), "Descargando modelos")
             

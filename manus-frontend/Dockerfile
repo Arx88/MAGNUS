@@ -6,21 +6,21 @@ WORKDIR /app
 COPY package*.json ./
 
 # Instalar dependencias
-RUN npm cache clean --force && npm install --legacy-peer-deps
+RUN npm ci
 
-# Copiar c贸digo fuente
+# Copiar c骴igo fuente
 COPY . .
 
-# Build de producci贸n
+# Build de producci髇
 RUN npm run build
 
-# Imagen de producci贸n con nginx
+# Imagen de producci髇 con nginx
 FROM nginx:alpine
 
 # Copiar build
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copiar configuraci贸n nginx
+# Copiar configuraci髇 nginx
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Exponer puerto
