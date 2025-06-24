@@ -28,26 +28,28 @@ def print_info(message):
 def print_warning(message):
     print(f"\n⚠️ WARNING: {message}")
 
+# Nueva función run_command proporcionada por el usuario
 def run_command(command_list, timeout=60, check=True, suppress_output=False):
     """Ejecuta un comando de subprocess de forma segura y devuelve (éxito, stdout, stderr)."""
     try:
+        # Añadir encoding y errors='replace' para sistemas Windows
         process = subprocess.run(
             command_list,
             capture_output=True,
             text=True,
-            check=check, # Lanza CalledProcessError si el comando devuelve un código de error
-            timeout=timeout
+            check=check,
+            timeout=timeout,
+            encoding='utf-8', # Especificar utf-8
+            errors='replace'  # Reemplazar caracteres que no se puedan decodificar
         )
         if not suppress_output:
-            # Imprimir stdout solo si no está vacío
             if process.stdout and process.stdout.strip():
-                 print_info(f"Salida de {' '.join(command_list)}:\n{process.stdout.strip()}")
-            # Imprimir stderr solo si no está vacío
+                print_info(f"Salida de {' '.join(command_list)}:\n{process.stdout.strip()}")
             if process.stderr and process.stderr.strip():
-                 print_warning(f"Salida de error (puede ser informativa) de {' '.join(command_list)}:\n{process.stderr.strip()}")
+                print_warning(f"Salida de error (puede ser informativa) de {' '.join(command_list)}:\n{process.stderr.strip()}")
         return True, process.stdout.strip(), process.stderr.strip()
     except subprocess.CalledProcessError as e:
-        if not suppress_output:
+        if not suppress_output: # Solo imprimir si no se suprime la salida
             print_error(f"Error al ejecutar: {' '.join(command_list)}")
             if e.stdout and e.stdout.strip(): print_info(f"Salida (stdout) del error: {e.stdout.strip()}")
             if e.stderr and e.stderr.strip(): print_error(f"Salida (stderr) del error: {e.stderr.strip()}")
@@ -60,9 +62,15 @@ def run_command(command_list, timeout=60, check=True, suppress_output=False):
         if not suppress_output:
             print_error(f"El comando '{' '.join(command_list)}' tardó demasiado en responder (timeout: {timeout}s).")
         return False, "", f"Timeout ({timeout}s) para el comando: {' '.join(command_list)}"
+    except Exception as e: # Captura otras excepciones de subprocess o generales
+        if not suppress_output:
+            print_error(f"Error inesperado al ejecutar {' '.join(command_list)}: {e}")
+        return False, "", str(e)
 
+# Nueva función check_supabase_cli proporcionada por el usuario
 def check_supabase_cli():
     print_info("Verificando Supabase CLI...")
+    # Añadimos encoding para intentar solucionar caracteres extraños en la salida de Windows
     success, _, stderr = run_command(["supabase", "--version"], suppress_output=True)
     if success:
         print_success("Supabase CLI está instalada.")
@@ -77,64 +85,60 @@ def check_supabase_cli():
 
             print_info("Intentando actualizar las fuentes de Winget...")
             # No es crítico si esto falla, podría ser por permisos o estar actualizado.
-            # run_command ya imprime la salida si no se suprime.
-            _, _, update_stderr = run_command(["winget", "source", "update"], timeout=120, check=False)
-            if "No se reconoció el nombre del argumento" in update_stderr and "update" in update_stderr:
-                 print_warning(f"Tu versión de 'winget source update' podría tener argumentos diferentes o no ser reconocida. Continuando de todas formas...")
-            else:
-                 print_info("Intento de actualización de fuentes de Winget completado.")
+            # run_command ya maneja la impresión de salida.
+            run_command(["winget", "source", "update"], timeout=180, check=False)
+            print_info("Intento de actualización de fuentes de Winget completado.") # Mensaje más neutral
 
+            package_id = "Supabase.SupabaseCLI"
+            print_info(f"Buscando el paquete '{package_id}' con Winget...")
 
-            # --- CAMBIO 1: Usar el ID de paquete correcto ---
-            package_id_to_install = "Supabase.SupabaseCLI"
-
-            print_info(f"Buscando el paquete '{package_id_to_install}' con Winget...")
-            search_cmd = ["winget", "search", package_id_to_install, "--source", "winget", "--accept-source-agreements"]
+            search_cmd = ["winget", "search", package_id, "--source", "winget", "--accept-source-agreements"]
             search_success, search_stdout, search_stderr = run_command(search_cmd, timeout=120, check=False)
 
             if not search_success or "No se encontró ningún paquete" in search_stdout or "No se encontró ningún paquete" in search_stderr:
-                 print_warning(f"Winget search no pudo confirmar el paquete '{package_id_to_install}'. (stdout: '{search_stdout}', stderr: '{search_stderr}'). Se intentará la instalación de todas formas con este ID.")
+                print_error(f"Winget no pudo encontrar el paquete '{package_id}'.")
+                print_info("Esto puede deberse a un problema con las fuentes de Winget o de red.")
+                print_info(f"Puedes intentar ejecutar 'winget search {package_id}' manualmente en PowerShell para depurar.")
+                # No continuamos si no se puede encontrar el paquete
             else:
-                 print_success(f"Paquete '{package_id_to_install}' encontrado en los repositorios de Winget.")
+                print_success(f"Paquete '{package_id}' encontrado en los repositorios de Winget.")
+                print_info(f"Intentando instalar '{package_id}' con Winget...")
 
+                winget_cmd = [
+                    "winget", "install", package_id,
+                    "--source", "winget",
+                    "--accept-package-agreements",
+                    "--accept-source-agreements"
+                ]
+                install_success, install_stdout, install_stderr = run_command(winget_cmd, timeout=300, check=False)
 
-            print_info(f"Intentando instalar '{package_id_to_install}' con Winget...")
-            # --- CAMBIO 2: Corregir el error tipográfico ---
-            winget_cmd = [
-                "winget", "install", package_id_to_install,
-                "--source", "winget",
-                "--accept-package-agreements",
-                "--accept-source-agreements"  # Corregido
-            ]
-            install_success, install_stdout, install_stderr = run_command(winget_cmd, timeout=300, check=False)
-
-            # --- CAMBIO 3: Mejorar la comprobación de éxito ---
-            # Winget puede devolver código 0 aunque no instale nada.
-            # Hay que verificar la salida de texto para estar seguros.
-            if install_success and "No se encontró ningún paquete" not in install_stdout and "No se encontró ningún paquete" not in install_stderr:
-                print_success("Comando de instalación de Winget parece haberse ejecutado. Verificando la instalación...")
-                success_after_install, _, _ = run_command(["supabase", "--version"], suppress_output=True)
-                if success_after_install:
-                    print_success("Supabase CLI instalada y verificada exitosamente.")
-                    return True
-                else:
-                    print_error("Supabase CLI aún no se encuentra después del intento de instalación con Winget.")
-                    print_info("Es posible que necesites reiniciar tu terminal (o VSCode) para que el PATH se actualice.")
-            else:
-                print_error(f"Falló la instalación de Supabase CLI con Winget.")
-                # El error ya se imprime desde run_command si no es suppress_output=False en la llamada.
-                # Aquí podemos añadir contexto específico si es necesario.
-                if not install_success:
-                     print_info(f"El comando 'winget install' devolvió un código de error.")
-                if "No se encontró ningún paquete" in install_stdout or "No se encontró ningún paquete" in install_stderr:
-                     print_info(f"Winget reportó explícitamente: 'No se encontró ningún paquete'.")
-
+                # Comprobación de éxito más estricta
+                # Winget en español podría decir "Instalado correctamente" o similar.
+                # Winget en inglés dice "Successfully installed"
+                # Sería mejor verificar si el comando `supabase --version` ahora funciona.
+                if install_success and \
+                   ("instalado correctamente" in install_stdout.lower() or "successfully installed" in install_stdout.lower()) and \
+                   "No se encontró ningún paquete" not in install_stdout and \
+                   "No se encontró ningún paquete" not in install_stderr:
+                    print_success("Winget reportó una instalación exitosa. Verificando...")
+                    success_after_install, _, _ = run_command(["supabase", "--version"], suppress_output=True)
+                    if success_after_install:
+                        print_success("¡Supabase CLI instalada y verificada exitosamente!")
+                        return True
+                    else:
+                        print_error("Supabase CLI aún no se encuentra después de la instalación, aunque Winget indicó éxito.")
+                        print_info("Es muy probable que necesites REINICIAR TU TERMINAL (o VSCode) para que el PATH se actualice.")
+                else: # La instalación falló o no se confirmó con la cadena esperada.
+                    print_error(f"Falló la instalación de Supabase CLI con Winget.")
+                    if not install_success:
+                         print_info(f"El comando 'winget install' devolvió un código de error.")
+                    elif not ("instalado correctamente" in install_stdout.lower() or "successfully installed" in install_stdout.lower()):
+                         print_info(f"Winget no confirmó una instalación exitosa en su salida (stdout no contiene 'instalado correctamente' o 'successfully installed').")
+                    # run_command ya imprimió stdout/stderr si no está suprimido.
         else:
             print_info("Instalación con Winget omitida por el usuario.")
 
     # Mensaje final si todo lo anterior falla
-    # stderr aquí es del primer `supabase --version`
-    # Solo mostrar si no es Windows o si la instalación de Winget no se intentó.
     initial_check_stderr = stderr
     if not (platform.system() == "Windows" and 'install_choice' in locals() and install_choice == 's'):
         if "Comando no encontrado" not in initial_check_stderr and initial_check_stderr:
@@ -142,6 +146,7 @@ def check_supabase_cli():
     print_info("Por favor, instala Supabase CLI manualmente siguiendo las instrucciones en: https://supabase.com/docs/guides/cli/getting-started")
     return False
 
+# El resto del archivo supabase_setup.py (desde check_supabase_login hasta el final) permanece igual
 def check_supabase_login():
     print_info("Verificando estado de login en Supabase CLI...")
     success, _, stderr = run_command(["supabase", "projects", "list"], suppress_output=True)

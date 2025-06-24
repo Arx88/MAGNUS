@@ -60,9 +60,10 @@ Este proyecto utiliza Supabase como backend de base de datos en producción o pa
 
     **¿Qué hace el script `supabase_setup.py`?**
     *   Verifica si la Supabase CLI está instalada.
-        *   Si estás en Windows y no se encuentra, el script primero intentará actualizar las fuentes de `winget` (ejecutando `winget source update`).
-        *   Luego, buscará el paquete `Supabase.SupabaseCLI` usando `winget search Supabase.SupabaseCLI`.
-        *   Si se encuentra (o como fallback), te ofrecerá intentar instalar/actualizar la CLI automáticamente usando `winget install Supabase.SupabaseCLI`.
+        *   Si estás en Windows y no se encuentra, el script intentará:
+            1.  Actualizar las fuentes de `winget` (`winget source update`).
+            2.  Buscar el paquete `Supabase.SupabaseCLI` usando `winget search Supabase.SupabaseCLI`.
+            3.  Si la búsqueda es exitosa, te ofrecerá instalar la CLI usando `winget install Supabase.SupabaseCLI`. El script verifica la salida de Winget para confirmar una instalación exitosa (buscando "instalado correctamente" o "successfully installed").
     *   Verifica que hayas iniciado sesión en la Supabase CLI.
     *   Se asegura de que el directorio actual esté configurado como un proyecto Supabase local (ejecutando `supabase init` si es necesario y lo apruebas).
     *   Te pide el `PROJECT_REF` de tu proyecto Supabase (si no puede encontrarlo en `supabase/config.toml`).
@@ -73,6 +74,7 @@ Este proyecto utiliza Supabase como backend de base de datos en producción o pa
 
     **Importante:**
     *   El script interactuará con la Supabase CLI. Lee atentamente los mensajes y las confirmaciones que solicita.
+    *   Si la Supabase CLI se instala mediante el script en Windows, es **muy recomendable reiniciar tu terminal** (o el editor VSCode y su terminal integrada) después de que el script termine. Esto asegura que los cambios en la variable de entorno PATH (que permiten encontrar `supabase.exe`) se apliquen correctamente.
     *   Después de ejecutar el script, siempre es una buena práctica verificar tu dashboard de Supabase para confirmar que el esquema de la base de datos se haya aplicado correctamente.
 
 ### Instalación Paso a Paso (Alternativa)
