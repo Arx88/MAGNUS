@@ -52,12 +52,15 @@ Este proyecto utiliza Supabase como backend de base de datos en producción o pa
     Este script te guiará a través del proceso de configuración de tu base de datos Supabase utilizando la **Supabase CLI**.
 
     **Prerrequisitos para usar `supabase_setup.py`:**
-    1.  **Supabase CLI Instalada:** Debes tener la Supabase CLI instalada en tu sistema. Si no la tienes, sigue las instrucciones en [Supabase CLI Documentation](https://supabase.com/docs/guides/cli).
+    1.  **Supabase CLI Instalada:** Debes tener la Supabase CLI instalada.
+        *   **Windows:** Si no está instalada, el script te ofrecerá la opción de intentar instalarla automáticamente usando `winget`. Asegúrate de que `winget` (App Installer) esté disponible en tu sistema (viene con versiones recientes de Windows o se puede instalar desde la Microsoft Store).
+        *   **Otros Sistemas Operativos (Linux, macOS):** Deberás instalarla manualmente siguiendo las instrucciones en [Supabase CLI Documentation](https://supabase.com/docs/guides/cli).
     2.  **Login en Supabase CLI:** Debes haber iniciado sesión en la Supabase CLI usando el comando `supabase login` en tu terminal. El script verificará esto y te guiará si es necesario.
     3.  **Archivo `supabase_init.sql`:** Asegúrate de que el archivo `supabase_init.sql` (que contiene el esquema inicial de la base de datos) esté presente en el directorio raíz del proyecto.
 
     **¿Qué hace el script `supabase_setup.py`?**
-    *   Verifica que la Supabase CLI esté instalada y que hayas iniciado sesión.
+    *   Verifica si la Supabase CLI está instalada. Si estás en Windows y no lo está, te ofrecerá instalarla con `winget`.
+    *   Verifica que hayas iniciado sesión en la Supabase CLI.
     *   Se asegura de que el directorio actual esté configurado como un proyecto Supabase local (ejecutando `supabase init` si es necesario y lo apruebas).
     *   Te pide el `PROJECT_REF` de tu proyecto Supabase (si no puede encontrarlo en `supabase/config.toml`).
     *   Vincula tu proyecto local con tu proyecto Supabase remoto usando `supabase link`.
