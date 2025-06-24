@@ -121,7 +121,7 @@ def check_supabase_cli():
                 "winget", "install", package_id_to_install,
                 "--source", "winget",
                 "--accept-package-agreements",
-                "--accept-source-agreements"  # Asegurado que está correcto
+                "--accept-source-agreements"  # Corregido y re-verificado
             ]
             install_success, install_stdout, install_stderr = run_command(winget_cmd, timeout=300, check=False)
 
