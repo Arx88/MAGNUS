@@ -129,15 +129,14 @@ def check_supabase_cli():
         print_header("Intentando instalación con Scoop")
         scoop_available, _, _ = run_command(["scoop", "--version"], suppress_output=True)
         if not scoop_available:
-            print_info("Scoop no está disponible en este sistema.")
-            install_scoop_choice = input("¿Deseas que el script intente instalar Scoop? (Esto cambiará tu política de ejecución de PowerShell y ejecutará un script de internet) (s/N): ").strip().lower()
-            if install_scoop_choice == 's':
-                print_info("Intentando instalar Scoop...")
-                ps_command_policy = "Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force"
-                ps_command_install = "iex (new-object net.webclient).downloadstring('https://get.scoop.sh')"
+            print_info("Scoop no está disponible. Intentando instalar Scoop automáticamente...")
+            # No más preguntas aquí, procedemos si attempt_auto_install fue 's'
+            print_info("Intentando instalar Scoop...")
+            ps_command_policy = "Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force"
+            ps_command_install = "iex (new-object net.webclient).downloadstring('https://get.scoop.sh')"
 
-                print_warning("Cambiando política de ejecución de PowerShell para CurrentUser a RemoteSigned...")
-                policy_success, _, policy_err = run_command(["powershell", "-Command", ps_command_policy], timeout=60, check=False)
+            print_warning("Cambiando política de ejecución de PowerShell para CurrentUser a RemoteSigned...")
+            policy_success, _, policy_err = run_command(["powershell", "-Command", ps_command_policy], timeout=60, check=False)
                 if not policy_success:
                     print_error(f"No se pudo cambiar la política de ejecución de PowerShell. Detalle: {policy_err}")
                 else:
@@ -152,11 +151,15 @@ def check_supabase_cli():
                         else:
                             print_error(f"Scoop no se pudo verificar después de la instalación. Error: {scoop_install_err}")
                     else:
-                        print_error(f"Falló la ejecución del script de instalación de Scoop. Error: {scoop_install_err}")
-            else:
-                print_info("Instalación de Scoop omitida por el usuario.")
+                        scoop_install_err_lower = scoop_install_err.lower()
+                        if "running the installer as administrator is disabled" in scoop_install_err_lower or "abort." in scoop_install_err_lower:
+                            print_error("La instalación de Scoop falló porque requiere privilegios de administrador.")
+                            print_warning("Por favor, re-ejecuta este script (supabase_setup.py) como Administrador.")
+                        else:
+                            print_error(f"Falló la ejecución del script de instalación de Scoop. Error: {scoop_install_err}")
+            # No hay 'else' para install_scoop_choice, ya que ahora es automático si se dio el consentimiento inicial.
 
-        if scoop_available:
+        if scoop_available: # Si estaba disponible o se instaló y verificó
             print_info("Intentando instalar 'supabase' con Scoop...")
             install_success, _, _ = run_command(["scoop", "install", "supabase"], timeout=300, check=False)
             if install_success:
@@ -214,42 +217,77 @@ def check_supabase_cli():
             os_type = platform.system().lower()
             arch = platform.machine().lower()
 
-            asset_filename_part = ""
+            asset_identifier = None
             asset_ext = ""
-            exe_name = "supabase"
+            exe_name = "supabase" # Nombre por defecto para Linux/macOS
 
             if os_type == "windows":
-                asset_ext = ".zip"
                 exe_name = "supabase.exe"
-                if arch in ["amd64", "x86_64"]: asset_filename_part = "windows-amd64"
-                elif arch in ["arm64", "aarch64"]: asset_filename_part = "windows-arm64"
+                asset_ext = ".zip"
+                if arch in ["amd64", "x86_64"]: asset_identifier = "windows-amd64"
+                elif arch in ["arm64", "aarch64"]: asset_identifier = "windows-arm64"
             elif os_type == "linux":
                 asset_ext = ".tar.gz"
-                if arch in ["amd64", "x86_64"]: asset_filename_part = "linux-amd64"
-                elif arch in ["arm64", "aarch64"]: asset_filename_part = "linux-arm64"
-            elif os_type == "darwin":
+                if arch in ["amd64", "x86_64"]: asset_identifier = "linux-amd64"
+                elif arch in ["arm64", "aarch64"]: asset_identifier = "linux-arm64"
+            elif os_type == "darwin": # macOS
                 asset_ext = ".tar.gz"
-                if arch in ["amd64", "x86_64"]: asset_filename_part = "darwin-amd64"
-                elif arch in ["arm64", "aarch64"]: asset_filename_part = "darwin-arm64"
+                if arch in ["amd64", "x86_64"]: asset_identifier = "darwin-amd64" # Intel Macs
+                elif arch in ["arm64", "aarch64"]: asset_identifier = "darwin-arm64" # Apple Silicon
 
-            if not asset_filename_part:
+            if not asset_identifier:
                 print_error(f"Combinación SO/arquitectura no soportada para descarga directa: {os_type}/{arch}")
             else:
+                print_info(f"Buscando asset para: {asset_identifier}{asset_ext}")
                 download_url = None
                 found_asset_name = ""
+
+                # Patrones de búsqueda más flexibles para el nombre del asset
+                # Ejemplo: supabase_1.2.3_windows_amd64.zip o supabase_cli_windows_amd64.zip
+                patterns_to_check = [
+                    f"supabase_cli_{asset_identifier}{asset_ext}", # Prioridad si existe con "cli"
+                    f"cli_{asset_identifier}{asset_ext}",
+                    f"supabase_{asset_identifier}{asset_ext}",
+                    f"{asset_identifier}{asset_ext}" # El más genérico
+                ]
+
                 for asset in assets:
-                    name = asset.get("name", "").lower()
-                    if asset_filename_part in name and name.endswith(asset_ext):
-                        download_url = asset.get("browser_download_url")
-                        found_asset_name = name
-                        print_success(f"Asset encontrado para descarga: {found_asset_name}")
+                    name_lower = asset.get("name", "").lower()
+                    for pattern_part in [asset_identifier, f"_{asset_identifier}_", f"_{asset_identifier}-", f"-{asset_identifier}-", f"-{asset_identifier}_"]:
+                        if pattern_part in name_lower and name_lower.endswith(asset_ext):
+                            # Verificar si el nombre también contiene una parte de versión (ej. v1.2.3 o 1.2.3)
+                            # Esto es para dar preferencia a los assets que parecen más completos o específicos.
+                            # Esta lógica puede volverse compleja si los patrones de nombrado son muy variados.
+                            # Por ahora, un match simple es suficiente si el anterior es muy estricto.
+                            download_url = asset.get("browser_download_url")
+                            found_asset_name = asset.get("name")
+                            print_success(f"Asset encontrado para descarga: {found_asset_name}")
+                            break
+                    if download_url:
                         break
 
+                # Fallback si la búsqueda más específica falla, intentamos con una más general
                 if not download_url:
-                    print_error(f"No se encontró un asset de descarga compatible para {asset_filename_part} en la última release.")
+                    for asset in assets:
+                        name_lower = asset.get("name", "").lower()
+                        # Buscar solo por os_type y arch_name_in_asset y extensión
+                        # Esto es menos preciso pero puede capturar variaciones.
+                        # Ej: supabase_windows_amd64.zip o supabase_v1.164.0_windows_amd64.zip
+                        # La lógica anterior de asset_filename_part ya hacía esto de forma más simple.
+                        # Revertimos a una búsqueda más simple y directa como antes:
+                        # asset_filename_part ya se construyó como "windows-amd64", "linux-arm64", etc.
+                        if asset_identifier in name_lower and name_lower.endswith(asset_ext):
+                            download_url = asset.get("browser_download_url")
+                            found_asset_name = asset.get("name")
+                            print_success(f"Asset encontrado (búsqueda general): {found_asset_name}")
+                            break
+
+
+                if not download_url:
+                    print_error(f"No se encontró un asset de descarga compatible para {asset_identifier} en la última release.")
                 else:
                     print_info(f"Descargando Supabase CLI desde: {download_url}")
-                    temp_dir = "temp_supabase_cli_download"
+                    temp_dir = "temp_supabase_cli_download" # Nombre diferente para evitar colisiones
                     os.makedirs(temp_dir, exist_ok=True)
                     download_path = os.path.join(temp_dir, found_asset_name)
 
