@@ -3,3 +3,12 @@
 @tailwind utilities;
 
 /* Your custom CSS can go here */
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
