@@ -1,104 +1,258 @@
 import os
-import supabase
-from supabase import create_client, Client
-from getpass import getpass
+import shutil
+import subprocess
+import datetime
+import configparser # Para leer el project_id de config.toml
 
-def setup_supabase():
-    """
-    Configura la base de datos Supabase ejecutando el script SQL de inicialización.
-    Solicita al usuario la URL del proyecto Supabase y la clave de API anónima.
-    """
-    print("Configuración de Supabase")
-    print("-------------------------")
+# Constantes
+SUPABASE_DIR = "supabase"
+MIGRATIONS_DIR = os.path.join(SUPABASE_DIR, "migrations")
+CONFIG_FILE_PATH = os.path.join(SUPABASE_DIR, "config.toml") # supabase/config.toml
+INIT_SQL_FILE = "supabase_init.sql"
 
-    supabase_url = input("Introduce la URL de tu proyecto Supabase: ")
-    supabase_key = getpass("Introduce tu clave de API anónima de Supabase (se ocultará al escribir): ")
+def print_header(title):
+    print("\n" + "=" * 40)
+    print(title)
+    print("=" * 40)
 
-    if not supabase_url or not supabase_key:
-        print("Error: La URL de Supabase y la clave de API son obligatorias.")
-        return
+def print_success(message):
+    print(f"\n✅ SUCCESS: {message}")
 
+def print_error(message):
+    print(f"\n❌ ERROR: {message}")
+
+def print_info(message):
+    print(f"\nℹ️ INFO: {message}")
+
+def print_warning(message):
+    print(f"\n⚠️ WARNING: {message}")
+
+def run_command(command_list, timeout=60, check=True, suppress_output=False):
+    """Ejecuta un comando de subprocess de forma segura y devuelve (éxito, stdout, stderr)."""
     try:
-        print(f"\nConectando a Supabase en {supabase_url}...")
-        client: Client = create_client(supabase_url, supabase_key)
-        print("Conexión exitosa a Supabase.")
-    except Exception as e:
-        print(f"Error al conectar con Supabase: {e}")
-        return
-
-    try:
-        # Leer el script SQL de inicialización
-        sql_file_path = os.path.join(os.path.dirname(__file__), 'supabase_init.sql')
-        if not os.path.exists(sql_file_path):
-            # Intentar una ruta alternativa si no se encuentra (ej. si se ejecuta desde el directorio raíz)
-            sql_file_path = 'supabase_init.sql'
-            if not os.path.exists(sql_file_path):
-                print(f"Error: No se encontró el archivo supabase_init.sql en {os.path.join(os.path.dirname(__file__), 'supabase_init.sql')} ni en el directorio actual.")
-                return
-
-        with open(sql_file_path, 'r', encoding='utf-8') as f:
-            sql_content = f.read()
-
-        print("\nEjecutando script de inicialización de la base de datos...")
-        # Supabase Python client no tiene un método directo para ejecutar SQL crudo múltiple.
-        # La forma recomendada es usar la API REST o funciones RPC.
-        # Para este script, asumiremos que el usuario puede ejecutar esto manualmente
-        # o usaremos una solución alternativa si es posible y segura.
-        # Por ahora, mostraremos el SQL y pediremos al usuario que lo ejecute.
-
-        # Alternativa: Dividir el script en sentencias y ejecutarlas una por una.
-        # Esto puede ser propenso a errores si hay dependencias complejas o transacciones.
-        statements = [s.strip() for s in sql_content.split(';') if s.strip()]
-
-        for i, statement in enumerate(statements):
-            if not statement:
-                continue
-            try:
-                # Usar rpc para ejecutar SQL. Esto requiere una función en Supabase o privilegios.
-                # Por simplicidad, vamos a simular la ejecución.
-                # En un escenario real, se necesitaría una función `execute_sql` en Supabase
-                # o usar la librería `psycopg2` si se tiene acceso directo a la BD.
-                print(f"Ejecutando sentencia {i+1}/{len(statements)}: {statement[:100]}...")
-                # client.rpc('execute_sql_statement', {'sql_statement': statement}).execute() # Ejemplo si existiera la función
-
-                # Simulación para este ejemplo, ya que la ejecución directa de SQL complejo es limitada.
-                # En un caso real, podrías considerar:
-                # 1. Subir el archivo SQL a Supabase Storage y ejecutarlo desde allí.
-                # 2. Crear una función en Supabase que tome el SQL como argumento y lo ejecute.
-                # 3. Para scripts grandes, es mejor que el usuario lo ejecute desde el editor SQL de Supabase.
-                if "CREATE TABLE" in statement.upper():
-                    table_name = statement.split("CREATE TABLE")[1].split("(")[0].strip()
-                    print(f"  (Simulación) Tabla '{table_name}' creada/verificada.")
-                elif "CREATE EXTENSION" in statement.upper():
-                    extension_name = statement.split("CREATE EXTENSION")[1].split("IF NOT EXISTS")[1].split('"')[1]
-                    print(f"  (Simulación) Extensión '{extension_name}' habilitada.")
-                elif "CREATE POLICY" in statement.upper():
-                    policy_name = statement.split("CREATE POLICY")[1].split("ON")[0].strip().replace('"', '')
-                    print(f"  (Simulación) Política '{policy_name}' creada.")
-                # Añadir más simulaciones según sea necesario
-
-            except Exception as stmt_error:
-                print(f"Error al ejecutar la sentencia: {statement[:100]}...")
-                print(f"  Error: {stmt_error}")
-                print("  Por favor, revisa el script SQL y ejecútalo manualmente en el editor SQL de Supabase si es necesario.")
-                # return # Descomentar si se quiere detener en el primer error
-
-        print("\n--------------------------------------------------------------------")
-        print("¡IMPORTANTE!")
-        print("El script ha intentado simular la ejecución de las sentencias SQL.")
-        print("Debido a las limitaciones del cliente Python de Supabase para ejecutar scripts SQL complejos directamente,")
-        print("te recomendamos encarecidamente que verifiques la correcta creación de tablas y configuración")
-        print("directamente en tu panel de Supabase (SQL Editor).")
-        print("Puedes encontrar el script completo en 'supabase_init.sql'.")
-        print("--------------------------------------------------------------------")
-
-        print("\nConfiguración de Supabase (simulada) completada.")
-        print("Por favor, verifica que todas las tablas y configuraciones se hayan aplicado correctamente en tu panel de Supabase.")
-
+        process = subprocess.run(
+            command_list,
+            capture_output=True,
+            text=True,
+            check=check, # Lanza CalledProcessError si el comando devuelve un código de error
+            timeout=timeout
+        )
+        if not suppress_output:
+            if process.stdout: print_info(f"Salida de {' '.join(command_list)}:\n{process.stdout.strip()}")
+            if process.stderr: print_warning(f"Salida de error (puede ser informativa) de {' '.join(command_list)}:\n{process.stderr.strip()}")
+        return True, process.stdout.strip(), process.stderr.strip()
+    except subprocess.CalledProcessError as e:
+        if not suppress_output:
+            print_error(f"Error al ejecutar: {' '.join(command_list)}")
+            if e.stdout: print_info(f"Salida (stdout) del error: {e.stdout.strip()}")
+            if e.stderr: print_error(f"Salida (stderr) del error: {e.stderr.strip()}")
+        return False, e.stdout.strip() if e.stdout else "", e.stderr.strip()
     except FileNotFoundError:
-        print(f"Error: El archivo 'supabase_init.sql' no se encontró. Asegúrate de que esté en el mismo directorio que este script.")
+        if not suppress_output:
+            print_error(f"Comando no encontrado: {command_list[0]}. Asegúrate de que esté instalado y en el PATH.")
+        return False, "", f"Comando no encontrado: {command_list[0]}"
+    except subprocess.TimeoutExpired:
+        if not suppress_output:
+            print_error(f"El comando '{' '.join(command_list)}' tardó demasiado en responder (timeout: {timeout}s).")
+        return False, "", f"Timeout ({timeout}s) para el comando: {' '.join(command_list)}"
+
+def check_supabase_cli():
+    print_info("Verificando Supabase CLI...")
+    success, _, stderr = run_command(["supabase", "--version"], suppress_output=True)
+    if success:
+        print_success("Supabase CLI está instalada.")
+        return True
+    else:
+        print_error("Supabase CLI no está instalada o no se encuentra en el PATH.")
+        if "Comando no encontrado" not in stderr : print_info(f"Detalle: {stderr}")
+        print_info("Por favor, instala Supabase CLI siguiendo las instrucciones en: https://supabase.com/docs/guides/cli/getting-started")
+        return False
+
+def check_supabase_login():
+    print_info("Verificando estado de login en Supabase CLI...")
+    # "supabase projects list" requiere autenticación.
+    success, _, stderr = run_command(["supabase", "projects", "list"], suppress_output=True) # Suprimir salida normal, solo mostrar si hay error
+    if success:
+        print_success("Ya has iniciado sesión en Supabase CLI.")
+        return True
+    else:
+        if "You are not logged in" in stderr or "Error: Unauthorized" in stderr or "Auth error" in stderr:
+            print_warning("No has iniciado sesión en Supabase CLI.")
+            print_info("Por favor, ejecuta 'supabase login' en tu terminal y luego vuelve a ejecutar este script.")
+        else:
+            print_error(f"Error desconocido al verificar el estado de login. Detalle: {stderr}")
+        return False
+
+def initialize_supabase_project_if_needed():
+    print_info("Verificando inicialización del proyecto Supabase local...")
+    if not os.path.isdir(SUPABASE_DIR): # Verificar si es un directorio
+        print_warning(f"El directorio '{SUPABASE_DIR}' no existe.")
+        run_init = input(f"¿Deseas ejecutar 'supabase init' para inicializarlo ahora? (s/N): ").strip().lower()
+        if run_init == 's':
+            success, _, stderr = run_command(["supabase", "init"])
+            if success:
+                print_success(f"Proyecto Supabase inicializado localmente en el directorio '{SUPABASE_DIR}'.")
+            else:
+                print_error(f"Error al ejecutar 'supabase init'. Detalle: {stderr}")
+                return False
+        else:
+            print_error(f"El script no puede continuar sin un proyecto Supabase inicializado localmente (directorio '{SUPABASE_DIR}').")
+            return False
+    else:
+        print_success(f"El directorio '{SUPABASE_DIR}' ya existe.")
+
+    # Asegurar que el directorio de migraciones exista
+    if not os.path.isdir(MIGRATIONS_DIR):
+        try:
+            os.makedirs(MIGRATIONS_DIR, exist_ok=True)
+            print_info(f"Directorio de migraciones '{MIGRATIONS_DIR}' creado/verificado.")
+        except OSError as e:
+            print_error(f"No se pudo crear el directorio de migraciones '{MIGRATIONS_DIR}': {e}")
+            return False
+    return True
+
+def get_project_ref():
+    print_info("Obteniendo referencia del proyecto Supabase (PROJECT_REF)...")
+    if os.path.exists(CONFIG_FILE_PATH):
+        try:
+            config = configparser.ConfigParser()
+            # Asegurarse de que el archivo no esté vacío
+            if os.path.getsize(CONFIG_FILE_PATH) > 0:
+                config.read(CONFIG_FILE_PATH)
+                # Supabase CLI v1.110.1 en adelante usa [project_id] sin comillas
+                # versiones anteriores podrían haberlo tenido como string literal.
+                # Intentamos leerlo como sección y como valor simple si falla.
+                project_id = None
+                if 'project_id' in config: # Como sección [project_id]
+                    project_id = config['project_id'].get('id', None) # Asumiendo [project_id]\nid = "xxx"
+
+                if not project_id and 'PROJECT' in config: # Como sección [PROJECT] (observado en algunos configs)
+                     project_id = config['PROJECT'].get('ref', None)
+
+
+                if not project_id: # Intentar leerlo como un valor simple si no es una sección
+                    # Esto es menos probable con configparser, pero por si acaso.
+                    # La estructura real de config.toml es:
+                    # project_id = "your-project-ref" (sin sección)
+                    # O más recientemente:
+                    # [project_id]
+                    # id = "your-project-ref"
+                    # Para el caso project_id = "xxx" sin sección, configparser lo leerá bajo DEFAULT si no hay secciones.
+                    # O si hay una sección por defecto que lo contenga.
+                    # Es más simple leer el archivo manualmente para este caso.
+                    with open(CONFIG_FILE_PATH, 'r') as f_config:
+                        for line in f_config:
+                            if line.strip().startswith('project_id'):
+                                project_id = line.split('=')[1].strip().replace('"', '')
+                                break
+
+                if project_id:
+                    print_success(f"PROJECT_REF encontrado en '{CONFIG_FILE_PATH}': {project_id}")
+                    return project_id
+                else:
+                    print_warning(f"No se pudo extraer 'project_id' de '{CONFIG_FILE_PATH}'. Formato inesperado.")
+            else:
+                print_warning(f"El archivo '{CONFIG_FILE_PATH}' está vacío.")
+        except Exception as e:
+            print_warning(f"No se pudo leer el PROJECT_REF de '{CONFIG_FILE_PATH}': {e}")
+
+    project_ref_input = input("Introduce tu PROJECT_REF de Supabase (lo encuentras en Configuración > General de tu dashboard): ").strip()
+    if not project_ref_input:
+        print_error("El PROJECT_REF es obligatorio.")
+        return None
+    return project_ref_input
+
+def link_project(project_ref):
+    print_info(f"Vinculando con el proyecto Supabase: {project_ref}...")
+    success, stdout, stderr = run_command(["supabase", "link", "--project-ref", project_ref])
+    if success:
+        print_success(f"Proyecto vinculado exitosamente con {project_ref}.")
+        return True
+    else:
+        # Supabase link puede fallar si ya está vinculado al mismo proyecto, lo cual no es un error crítico.
+        if "already linked to project" in stderr.lower() and project_ref in stderr.lower():
+            print_success(f"El proyecto ya está vinculado con {project_ref}. Continuando...")
+            return True
+        elif "config file differs" in stderr.lower():
+             print_warning(f"El project ID en {CONFIG_FILE_PATH} difiere del proporcionado.")
+             print_info("Por favor, resuelve esto manualmente o ejecuta 'supabase link --project-ref TU_PROJECT_ID --force' si es necesario.")
+             # Consideramos esto un fallo para el script automático.
+        print_error(f"Error al vincular el proyecto. Detalle: {stderr}")
+        return False
+
+def create_migration_from_init_sql():
+    print_info(f"Creando archivo de migración desde '{INIT_SQL_FILE}'...")
+    if not os.path.exists(INIT_SQL_FILE):
+        print_error(f"El archivo '{INIT_SQL_FILE}' no se encontró en el directorio actual.")
+        return False
+
+    if not os.path.isdir(MIGRATIONS_DIR): # Doble check
+        print_error(f"El directorio de migraciones '{MIGRATIONS_DIR}' no existe. Asegúrate de que 'supabase init' se haya ejecutado correctamente.")
+        return False
+
+    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+    migration_file_name = f"{timestamp}_initial_schema_from_script.sql"
+    migration_file_path = os.path.join(MIGRATIONS_DIR, migration_file_name)
+
+    try:
+        shutil.copyfile(INIT_SQL_FILE, migration_file_path)
+        print_success(f"Archivo de migración creado: '{migration_file_path}'")
+        return True
     except Exception as e:
-        print(f"Ocurrió un error durante la configuración: {e}")
+        print_error(f"No se pudo crear el archivo de migración: {e}")
+        return False
+
+def apply_migrations(project_ref):
+    print_info("Aplicando migraciones a la base de datos Supabase remota...")
+    print_warning("Esto puede tardar unos momentos y aplicará CUALQUIER migración pendiente.")
+
+    command = ["supabase", "db", "push"]
+
+    print_info(f"Ejecutando: {' '.join(command)} para el proyecto {project_ref}")
+    success, _, stderr = run_command(command, timeout=180) # Timeout de 3 minutos
+
+    if success:
+        print_success("Migraciones aplicadas exitosamente (o no había cambios pendientes).")
+        return True
+    else:
+        print_error(f"Error al aplicar las migraciones. Detalle: {stderr}")
+        return False
+
+def main():
+    print_header("Script de Configuración de Supabase con CLI")
+
+    if not check_supabase_cli():
+        return
+
+    if not initialize_supabase_project_if_needed():
+        return
+
+    # El login es crucial antes de intentar obtener project_ref o linkear
+    if not check_supabase_login():
+        return
+
+    project_ref = get_project_ref()
+    if not project_ref:
+        return
+
+    if not link_project(project_ref):
+        print_error("No se pudo asegurar el vínculo con el proyecto Supabase. Saliendo.")
+        return
+
+    if not create_migration_from_init_sql():
+        return
+
+    confirm_apply = input(f"\n¿Estás listo para aplicar las migraciones (incluyendo '{INIT_SQL_FILE}') a tu proyecto Supabase '{project_ref}'? (s/N): ").strip().lower()
+    if confirm_apply == 's':
+        if apply_migrations(project_ref):
+            print_success("¡Proceso de configuración de Supabase completado!")
+            print_info("Recuerda verificar tu dashboard de Supabase para confirmar que todo está como esperas.")
+        else:
+            print_error("La configuración de Supabase falló durante la aplicación de migraciones.")
+            print_info("Revisa los logs y el dashboard de Supabase.")
+    else:
+        print_info("Aplicación de migraciones cancelada por el usuario.")
+        print_info(f"Puedes aplicar las migraciones manualmente ejecutando 'supabase db push' en la terminal, desde la raíz de tu proyecto.")
 
 if __name__ == "__main__":
-    setup_supabase()
+    main()
