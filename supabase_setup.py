@@ -67,83 +67,108 @@ def run_command(command_list, timeout=60, check=True, suppress_output=False):
             print_error(f"Error inesperado al ejecutar {' '.join(command_list)}: {e}")
         return False, "", str(e)
 
-# Nueva función check_supabase_cli proporcionada por el usuario
+# Nueva función check_supabase_cli con lógica secuencial de instalación
 def check_supabase_cli():
     print_info("Verificando Supabase CLI...")
-    # Añadimos encoding para intentar solucionar caracteres extraños en la salida de Windows
-    success, _, stderr = run_command(["supabase", "--version"], suppress_output=True)
+    success, initial_stdout, initial_stderr = run_command(["supabase", "--version"], suppress_output=True)
     if success:
-        print_success("Supabase CLI está instalada.")
+        print_success("Supabase CLI ya está instalada.")
         return True
 
     print_warning("Supabase CLI no está instalada o no se encuentra en el PATH.")
-    if platform.system() == "Windows":
-        print_info("Sistema operativo detectado: Windows.")
-        install_choice = input("¿Deseas intentar instalar Supabase CLI usando Winget? (s/N): ").strip().lower()
-        if install_choice == 's':
-            print_info("Intentando instalar Supabase CLI con Winget...")
 
-            print_info("Intentando actualizar las fuentes de Winget...")
-            # No es crítico si esto falla, podría ser por permisos o estar actualizado.
-            # run_command ya maneja la impresión de salida.
-            run_command(["winget", "source", "update"], timeout=180, check=False)
-            print_info("Intento de actualización de fuentes de Winget completado.") # Mensaje más neutral
+    # Preguntar una sola vez si se desea intentar la instalación automática
+    attempt_auto_install = input("¿Deseas que el script intente instalar Supabase CLI automáticamente? (s/N): ").strip().lower()
+    if attempt_auto_install != 's':
+        print_info("Instalación automática omitida por el usuario.")
+        print_info("Por favor, instala Supabase CLI manualmente: https://supabase.com/docs/guides/cli/getting-started")
+        return False
+
+    # --- Secuencia de intentos de instalación ---
+
+    # 1. WINGET (Solo Windows)
+    if platform.system() == "Windows":
+        print_header("Intentando instalación con Winget (Windows)")
+        winget_available, _, _ = run_command(["winget", "--version"], suppress_output=True)
+        if winget_available:
+            print_info("Winget detectado. Intentando actualizar fuentes...")
+            run_command(["winget", "source", "update"], timeout=180, check=False) # Salida manejada por run_command
+            print_info("Intento de actualización de fuentes de Winget completado.")
 
             package_id = "Supabase.SupabaseCLI"
             print_info(f"Buscando el paquete '{package_id}' con Winget...")
-
             search_cmd = ["winget", "search", package_id, "--source", "winget", "--accept-source-agreements"]
             search_success, search_stdout, search_stderr = run_command(search_cmd, timeout=120, check=False)
 
-            if not search_success or "No se encontró ningún paquete" in search_stdout or "No se encontró ningún paquete" in search_stderr:
-                print_error(f"Winget no pudo encontrar el paquete '{package_id}'.")
-                print_info("Esto puede deberse a un problema con las fuentes de Winget o de red.")
-                print_info(f"Puedes intentar ejecutar 'winget search {package_id}' manualmente en PowerShell para depurar.")
-                # No continuamos si no se puede encontrar el paquete
-            else:
-                print_success(f"Paquete '{package_id}' encontrado en los repositorios de Winget.")
+            if search_success and package_id.lower() in search_stdout.lower() and "No se encontró ningún paquete" not in search_stdout :
+                print_success(f"Paquete '{package_id}' encontrado vía Winget.")
                 print_info(f"Intentando instalar '{package_id}' con Winget...")
+                winget_cmd = ["winget", "install", package_id, "--source", "winget", "--accept-package-agreements", "--accept-source-agreements"]
+                install_success, install_stdout, _ = run_command(winget_cmd, timeout=300, check=False)
 
-                winget_cmd = [
-                    "winget", "install", package_id,
-                    "--source", "winget",
-                    "--accept-package-agreements",
-                    "--accept-source-agreements"
-                ]
-                install_success, install_stdout, install_stderr = run_command(winget_cmd, timeout=300, check=False)
-
-                # Comprobación de éxito más estricta
-                # Winget en español podría decir "Instalado correctamente" o similar.
-                # Winget en inglés dice "Successfully installed"
-                # Sería mejor verificar si el comando `supabase --version` ahora funciona.
-                if install_success and \
-                   ("instalado correctamente" in install_stdout.lower() or "successfully installed" in install_stdout.lower()) and \
-                   "No se encontró ningún paquete" not in install_stdout and \
-                   "No se encontró ningún paquete" not in install_stderr:
-                    print_success("Winget reportó una instalación exitosa. Verificando...")
-                    success_after_install, _, _ = run_command(["supabase", "--version"], suppress_output=True)
-                    if success_after_install:
-                        print_success("¡Supabase CLI instalada y verificada exitosamente!")
+                if install_success and ("instalado correctamente" in install_stdout.lower() or "successfully installed" in install_stdout.lower()):
+                    print_success("Winget reportó instalación exitosa. Verificando...")
+                    if run_command(["supabase", "--version"], suppress_output=True)[0]:
+                        print_success("¡Supabase CLI instalada y verificada exitosamente vía Winget!")
+                        print_warning("Es posible que necesites REINICIAR TU TERMINAL (o VSCode) para que el PATH se actualice.")
                         return True
                     else:
-                        print_error("Supabase CLI aún no se encuentra después de la instalación, aunque Winget indicó éxito.")
-                        print_info("Es muy probable que necesites REINICIAR TU TERMINAL (o VSCode) para que el PATH se actualice.")
-                else: # La instalación falló o no se confirmó con la cadena esperada.
-                    print_error(f"Falló la instalación de Supabase CLI con Winget.")
-                    if not install_success:
-                         print_info(f"El comando 'winget install' devolvió un código de error.")
-                    elif not ("instalado correctamente" in install_stdout.lower() or "successfully installed" in install_stdout.lower()):
-                         print_info(f"Winget no confirmó una instalación exitosa en su salida (stdout no contiene 'instalado correctamente' o 'successfully installed').")
-                    # run_command ya imprimió stdout/stderr si no está suprimido.
+                        print_error("Supabase CLI no se encuentra después de la instalación con Winget, aunque Winget indicó éxito.")
+                else:
+                    print_error("Falló la instalación con Winget o no se confirmó el éxito.")
+            else:
+                print_warning(f"Winget no pudo encontrar/confirmar el paquete '{package_id}'. (Search stdout: '{search_stdout}', stderr: '{search_stderr}')")
         else:
-            print_info("Instalación con Winget omitida por el usuario.")
+            print_info("Winget no está disponible en este sistema.")
 
-    # Mensaje final si todo lo anterior falla
-    initial_check_stderr = stderr
-    if not (platform.system() == "Windows" and 'install_choice' in locals() and install_choice == 's'):
-        if "Comando no encontrado" not in initial_check_stderr and initial_check_stderr:
-            print_info(f"Detalle del intento inicial de 'supabase --version': {initial_check_stderr}")
-    print_info("Por favor, instala Supabase CLI manualmente siguiendo las instrucciones en: https://supabase.com/docs/guides/cli/getting-started")
+    # 2. SCOOP (Principalmente Windows, pero puede estar en otros SO si el usuario lo instaló)
+    # No preguntaremos de nuevo, si el usuario aceptó la instalación automática, probamos todos los métodos.
+    print_header("Intentando instalación con Scoop")
+    scoop_available, _, _ = run_command(["scoop", "--version"], suppress_output=True)
+    if scoop_available:
+        print_info("Scoop detectado. Intentando instalar 'supabase'...")
+        # Scoop puede necesitar que el bucket 'extras' esté añadido para algunos paquetes.
+        # Por simplicidad, no intentaremos añadir buckets aquí.
+        install_success, _, _ = run_command(["scoop", "install", "supabase"], timeout=300, check=False)
+        if install_success: # Scoop suele ser más directo; si el comando tiene éxito, usualmente está instalado.
+            print_success("Comando 'scoop install supabase' ejecutado. Verificando...")
+            if run_command(["supabase", "--version"], suppress_output=True)[0]:
+                print_success("¡Supabase CLI instalada y verificada exitosamente vía Scoop!")
+                print_warning("Es posible que necesites REINICIAR TU TERMINAL (o VSCode) para que el PATH se actualice.")
+                return True
+            else:
+                print_error("Supabase CLI no se encuentra después de la instalación con Scoop.")
+        else:
+            print_error("Falló la instalación con Scoop.")
+    else:
+        print_info("Scoop no está disponible en este sistema.")
+
+    # 3. NPM (Multiplataforma)
+    print_header("Intentando instalación con NPM")
+    npm_available, _, _ = run_command(["npm", "--version"], suppress_output=True)
+    if npm_available:
+        print_info("NPM detectado. Intentando instalar 'supabase' globalmente...")
+        # npm install -g puede requerir permisos de administrador en algunos sistemas.
+        install_success, _, _ = run_command(["npm", "install", "supabase", "--global"], timeout=300, check=False)
+        if install_success: # Similar a scoop, si npm -g tiene éxito, suele funcionar.
+            print_success("Comando 'npm install supabase --global' ejecutado. Verificando...")
+            # La verificación de `supabase --version` puede fallar inmediatamente si el PATH global de npm no está en la sesión actual.
+            if run_command(["supabase", "--version"], suppress_output=True)[0]:
+                print_success("¡Supabase CLI instalada y verificada exitosamente vía NPM!")
+                print_warning("Es posible que necesites REINICIAR TU TERMINAL (o VSCode) para que el PATH se actualice.")
+                return True
+            else:
+                print_error("Supabase CLI no se encuentra después de la instalación con NPM.")
+                print_info("Esto es común si el directorio global de paquetes de NPM no está en tu PATH o si la terminal necesita reiniciarse.")
+                print_info("Intenta reiniciar tu terminal o verifica la configuración de tu PATH para los módulos globales de NPM.")
+        else:
+            print_error("Falló la instalación con NPM.")
+    else:
+        print_info("NPM no está disponible en este sistema.")
+
+    # Si todos los métodos fallaron
+    print_error("Todos los métodos de instalación automática fallaron o no estaban disponibles.")
+    print_info("Por favor, instala Supabase CLI manualmente: https://supabase.com/docs/guides/cli/getting-started")
     return False
 
 # El resto del archivo supabase_setup.py (desde check_supabase_login hasta el final) permanece igual
