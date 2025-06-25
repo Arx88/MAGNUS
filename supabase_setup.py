@@ -418,23 +418,66 @@ def check_supabase_cli(): # Modificado para devolver ruta, SUPABASE_IN_PATH o Fa
 
 def check_supabase_login(supabase_cmd="supabase"): # Añadir supabase_cmd
     print_info("Verificando estado de login en Supabase CLI...")
-    success, _, stderr = run_command([supabase_cmd, "projects", "list"], suppress_output=True, supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None)
+    # Intento 1: Verificar si ya está logueado
+    print_info("Verificando estado de login en Supabase CLI (intento 1)...")
+    success, _, stderr = run_command(
+        [supabase_cmd, "projects", "list"],
+        suppress_output=True,
+        supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None
+    )
+
     if success:
         print_success("Ya has iniciado sesión en Supabase CLI.")
-        return True
-    else:
-        # Convertir stderr a minúsculas para hacer la comprobación insensible a mayúsculas/minúsculas
-        stderr_lower = stderr.lower()
-        if "you are not logged in" in stderr_lower or \
-           "error: unauthorized" in stderr_lower or \
-           "auth error" in stderr_lower or \
-           "access token not provided" in stderr_lower:
-            print_warning("No has iniciado sesión en Supabase CLI.")
-            # Usar os.path.basename(supabase_cmd) para el mensaje si es una ruta larga
-            login_command_display = os.path.basename(supabase_cmd)
-            print_info(f"Por favor, ejecuta '{login_command_display} login' en tu terminal y luego vuelve a ejecutar este script.")
+        return True # O SUPABASE_IN_PATH si es la convención para "listo y en path"
+
+    # Si falla el primer intento, determinar si es por falta de login
+    stderr_lower = stderr.lower()
+    needs_login = "you are not logged in" in stderr_lower or \
+                  "error: unauthorized" in stderr_lower or \
+                  "auth error" in stderr_lower or \
+                  "access token not provided" in stderr_lower
+
+    if needs_login:
+        print_warning("No has iniciado sesión en Supabase CLI.")
+        login_command_display = os.path.basename(supabase_cmd)
+        print_info(f"Intentando ejecutar '{login_command_display} login' interactivamente...")
+        print_info("Por favor, sigue las instrucciones en tu navegador para completar el login.")
+
+        # Intentar ejecutar 'supabase login'
+        # No suprimir salida para que el usuario vea los prompts. check=False para manejar cancelación.
+        login_success, login_stdout, login_stderr = run_command(
+            [supabase_cmd, "login"],
+            suppress_output=False, # Mostrar salida de 'supabase login'
+            check=False, # No fallar el script si 'supabase login' devuelve error (ej. usuario cancela)
+            timeout=300, # Dar tiempo suficiente para la interacción del navegador
+            supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None
+        )
+
+        if login_success:
+            print_success(f"'{login_command_display} login' completado (o ya estabas logueado).")
+            print_info("Verificando estado de login en Supabase CLI (intento 2)...")
+            # Intento 2: Re-verificar después de 'supabase login'
+            retry_success, _, retry_stderr = run_command(
+                [supabase_cmd, "projects", "list"],
+                suppress_output=True,
+                supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None
+            )
+            if retry_success:
+                print_success("¡Login verificado exitosamente después del intento interactivo!")
+                return True # O SUPABASE_IN_PATH
+            else:
+                print_error(f"Falló la verificación del login después de intentar '{login_command_display} login'.")
+                print_info(f"Detalle del reintento: {retry_stderr}")
+                print_info(f"Asegúrate de haber completado el proceso de login en el navegador. Si el problema persiste, verifica tu conexión o intenta '{login_command_display} login' manualmente en la terminal.")
+                return False
         else:
-            print_error(f"Error desconocido al verificar el estado de login. Detalle: {stderr}")
+            print_error(f"El comando '{login_command_display} login' no finalizó exitosamente o fue cancelado.")
+            if login_stderr: print_warning(f"Detalle del error de login: {login_stderr}")
+            print_info(f"Por favor, intenta ejecutar '{login_command_display} login' manualmente en tu terminal y luego vuelve a ejecutar este script.")
+            return False
+    else:
+        # El error original al listar proyectos no era por falta de login conocido
+        print_error(f"Error desconocido al verificar el estado de login (no parece ser un problema de autenticación). Detalle: {stderr}")
         return False
 
 def initialize_supabase_project_if_needed(supabase_cmd="supabase"):
