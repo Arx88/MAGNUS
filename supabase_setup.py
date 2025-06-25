@@ -649,51 +649,35 @@ def link_project(project_ref, supabase_cmd="supabase"):
 
     if success:
         print_success(f"Proyecto vinculado exitosamente con {project_ref}.")
-        # Guardar el project_ref en config.toml si el link fue exitoso y no estaba ya allí o difiere
+        # Actualizar/crear config.toml con el project_id correcto
         try:
-            config_needs_update = False
-            if os.path.exists(CONFIG_FILE_PATH):
-                config = configparser.ConfigParser()
-                config.read(CONFIG_FILE_PATH)
-                current_project_id_in_config = None
-                if config.has_option(config.default_section, 'project_id'): # Asumiendo que está en la sección default
-                    current_project_id_in_config = config.get(config.default_section, 'project_id').strip('"\'')
+            os.makedirs(SUPABASE_DIR, exist_ok=True)
+            new_project_id_line = f'project_id = "{project_ref}"\n'
+            lines_to_write = []
+            existed_before = os.path.exists(CONFIG_FILE_PATH)
 
-                if current_project_id_in_config != project_ref:
-                    config_needs_update = True
-                    if current_project_id_in_config:
-                        print_info(f"Actualizando project_id en '{CONFIG_FILE_PATH}' de '{current_project_id_in_config}' a '{project_ref}'.")
-                    else:
-                        print_info(f"Estableciendo project_id en '{CONFIG_FILE_PATH}' a '{project_ref}'.")
-                else:
-                    print_info(f"El project_id en '{CONFIG_FILE_PATH}' ya coincide con '{project_ref}'.")
+            if existed_before:
+                print_info(f"Actualizando '{CONFIG_FILE_PATH}' para asegurar que project_id = \"{project_ref}\".")
+                with open(CONFIG_FILE_PATH, 'r') as f_cfg_read:
+                    for line in f_cfg_read:
+                        # Keep lines that are not project_id definitions
+                        if not (line.strip().startswith("project_id") and "=" in line):
+                            lines_to_write.append(line)
+            else:
+                print_info(f"Creando '{CONFIG_FILE_PATH}' con project_id = \"{project_ref}\".")
 
-            else: # El archivo config.toml no existe
-                config_needs_update = True
-                print_info(f"Creando '{CONFIG_FILE_PATH}' con project_id '{project_ref}'.")
+            with open(CONFIG_FILE_PATH, 'w') as f_cfg_write:
+                f_cfg_write.write(new_project_id_line) # Write the new/correct project_id first
+                for line in lines_to_write:
+                    f_cfg_write.write(line)
 
-            if config_needs_update:
-                # Crear el directorio supabase si no existe (aunque 'init' debería haberlo hecho)
-                os.makedirs(SUPABASE_DIR, exist_ok=True)
-                config = configparser.ConfigParser() # Empezar con un config limpio para escribir
-                # Asegurar que la sección por defecto exista si no hay otras secciones.
-                # ConfigParser escribe [DEFAULT] si no hay otras secciones, pero si el archivo
-                # es leído y no tiene secciones, puede dar error.
-                # Es más seguro añadir explícitamente project_id sin sección o en una sección conocida.
-                # Supabase CLI parece ponerlo sin una sección específica, o bajo [project_id] en algunos casos.
-                # Por simplicidad y consistencia con la lectura manual, lo ponemos sin sección.
-                # Sin embargo, configparser requiere una sección para escribir.
-                # Vamos a escribirlo en la sección DEFAULT si no hay otra cosa.
-                # O, si sabemos que `supabase init` crea una estructura específica, la seguimos.
-                # El log del usuario indica: 'project_id = "nhtllunnqhgccrqjwbwz"\n' (sin sección)
-                # Para escribir esto con configparser, es complicado. Escribámoslo manualmente.
+            if existed_before:
+                print_success(f"'{CONFIG_FILE_PATH}' actualizado para reflejar project_id = \"{project_ref}\".")
+            else:
+                print_success(f"'{CONFIG_FILE_PATH}' creado con project_id = \"{project_ref}\".")
 
-                with open(CONFIG_FILE_PATH, 'w') as f_cfg:
-                    f_cfg.write(f'project_id = "{project_ref}"\n')
-                print_success(f"Archivo '{CONFIG_FILE_PATH}' actualizado/creado con project_id = \"{project_ref}\".")
-
-        except Exception as e_cfg_write:
-            print_warning(f"No se pudo actualizar/crear '{CONFIG_FILE_PATH}' con el project_ref: {e_cfg_write}")
+        except Exception as e_cfg_update:
+            print_warning(f"No se pudo actualizar/crear '{CONFIG_FILE_PATH}' con el project_ref: {e_cfg_update}")
         return True
     else:
         # Analizar stderr para dar mejores mensajes
@@ -777,9 +761,40 @@ def apply_migrations(project_ref, supabase_cmd="supabase"):
 
     command_list = [supabase_cmd, "db", "push"]
 
+    # Check for SUPABASE_DB_PASSWORD env var again, as `db push` also has a -p flag
+    # This is a defense-in-depth measure.
+    db_password = os.environ.get("SUPABASE_DB_PASSWORD")
+    if db_password:
+        print_info("Usando contraseña de la variable de entorno SUPABASE_DB_PASSWORD para 'db push'.")
+        # Unlike `link`, `db push` might not automatically pick up the env var
+        # if it's not explicitly designed to, or if its primary way is through linked context.
+        # Adding it explicitly if the flag exists and env var is present.
+        command_list.extend(["--password", db_password])
+    else:
+        print_info("SUPABASE_DB_PASSWORD no está configurada. 'db push' se ejecutará sin pasar una contraseña explícita (confiando en la sesión de 'link').")
+
     # Usar os.path.basename(supabase_cmd) para mensajes si es una ruta larga
-    print_info(f"Ejecutando: {os.path.basename(supabase_cmd)} db push para el proyecto {project_ref}")
-    success, _, stderr = run_command(command_list, timeout=180, suppress_output=False, supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None)
+    # Ocultar la contraseña en el mensaje de log si se proporcionó
+    command_list_display = list(command_list)
+    try:
+        idx = command_list_display.index("--password")
+        if idx + 1 < len(command_list_display):
+            command_list_display[idx+1] = "*******"
+    except ValueError:
+        pass # --password no estaba en la lista
+    final_db_push_command_str = ' '.join(command_list_display)
+
+    print_info(f"Ejecutando: {final_db_push_command_str} para el proyecto {project_ref}")
+
+    # Aumentar el timeout para db push, antes era 180s.
+    new_timeout = 360 # 6 minutos
+    print_info(f"Timeout para 'db push' configurado a {new_timeout} segundos.")
+    success, stdout, stderr = run_command(
+        command_list,
+        timeout=new_timeout,
+        suppress_output=False,
+        supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None
+    )
 
     if success:
         print_success("Migraciones aplicadas exitosamente (o no había cambios pendientes).")
