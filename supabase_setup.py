@@ -623,9 +623,13 @@ def link_project(project_ref, supabase_cmd="supabase"):
             print_info("Por favor, resuelve esto manualmente o considera usar el flag --force si estás seguro (ej. 'supabase link --project-ref TU_PROJECT_ID --force').")
             # Nota: El script actual no añade --force automáticamente para link.
             return False
-        elif "timed out" in stderr_lower or (not success and not stderr.strip() and not stdout.strip()):
-            # El segundo caso es si success es False pero no hay stderr ni stdout,
-            # lo que puede suceder si el proceso se cuelga y run_command lo mata por timeout sin que el proceso hijo escriba nada.
+
+        # Condición corregida para detectar el mensaje de timeout de run_command
+        is_timeout_error = "timeout (" in stderr_lower
+        # Condición para detectar un proceso que pudo haberse colgado sin output antes de ser terminado por nuestro timeout
+        is_hung_process = not success and not stderr.strip() and not stdout.strip()
+
+        if is_timeout_error or is_hung_process:
             print_error(f"El comando '{link_command_str}' falló, muy probablemente por timeout o porque está esperando un input interactivo (como la contraseña de la base de datos).")
             print_info("\nRecomendaciones:")
             print_info(f"  1. Intenta ejecutar el comando '{link_command_str}' manualmente en tu terminal.")
