@@ -51,11 +51,23 @@ class Database:
             service_key = app.config.get('SUPABASE_SERVICE_KEY')
             
             # Para desarrollo local, usar variables de entorno específicas
-            pg_host = os.environ.get('POSTGRES_HOST', 'localhost')
-            pg_port = os.environ.get('POSTGRES_PORT', '5432')
-            pg_db = os.environ.get('POSTGRES_DB', 'postgres')
-            pg_user = os.environ.get('POSTGRES_USER', 'postgres')
-            pg_password = os.environ.get('POSTGRES_PASSWORD', 'postgres')
+            # Prioritize DATABASE_URL if available
+            database_url = os.environ.get('DATABASE_URL')
+            if database_url:
+                from urllib.parse import urlparse
+                url = urlparse(database_url)
+                pg_host = url.hostname
+                pg_port = url.port
+                pg_db = url.path[1:] # Remove leading '/'
+                pg_user = url.username
+                pg_password = url.password
+            else:
+                # Fallback to individual environment variables or defaults
+                pg_host = os.environ.get('POSTGRES_HOST', 'localhost')
+                pg_port = os.environ.get('POSTGRES_PORT', '5432')
+                pg_db = os.environ.get('POSTGRES_DB', 'postgres')
+                pg_user = os.environ.get('POSTGRES_USER', 'postgres')
+                pg_password = os.environ.get('POSTGRES_PASSWORD', 'postgres')
             
             self.pg_connection = psycopg2.connect(
                 host=pg_host,
@@ -66,7 +78,7 @@ class Database:
                 cursor_factory=RealDictCursor
             )
             
-            logger.info("PostgreSQL direct connection established")
+            logger.info(f"PostgreSQL direct connection established to {pg_host}:{pg_port}/{pg_db}")
             
         except Exception as e:
             logger.warning(f"Could not establish direct PostgreSQL connection: {str(e)}")
