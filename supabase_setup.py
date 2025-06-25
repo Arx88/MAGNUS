@@ -882,31 +882,9 @@ def main():
         if confirm_reset == 'yes':
             print_info(f"Intentando resetear la base de datos remota para el proyecto {project_ref}...")
 
+            # unknown flag: --password | El comando 'reset' no usa --password, se basa en el link previo.
             reset_command_list = [supabase_executable_to_use, "db", "reset", "--debug"]
-            # `supabase db reset` suele operar sobre el proyecto vinculado y no necesita --project-ref
-            # y puede que no siempre necesite --password si la CLI tiene una sesión activa.
-            # Sin embargo, si la contraseña se proporcionó durante el link, es bueno intentarlo.
-            if session_db_password:
-                reset_command_list.extend(["--password", session_db_password])
-                print_info("Usando contraseña proporcionada/detectada durante el 'link' para 'db reset'.")
-            else:
-                # Si no hay contraseña de sesión, intentar con la variable de entorno
-                db_password_env_reset = os.environ.get("SUPABASE_DB_PASSWORD")
-                if db_password_env_reset:
-                    reset_command_list.extend(["--password", db_password_env_reset])
-                    print_info("Usando contraseña de la variable de entorno SUPABASE_DB_PASSWORD para 'db reset'.")
-                else:
-                    print_info("No se proporcionó contraseña explícita para 'db reset'. El comando podría fallar si es requerida y no hay sesión activa.")
-
-            reset_command_display = list(reset_command_list)
-            try:
-                idx = reset_command_display.index("--password")
-                if idx + 1 < len(reset_command_display):
-                    reset_command_display[idx+1] = "*******"
-            except ValueError:
-                pass
-
-            print_info(f"Ejecutando: {' '.join(reset_command_display)}")
+            print_info(f"Ejecutando: {' '.join(reset_command_list)}")
 
             reset_success, _, reset_stderr = run_command(
                 reset_command_list,
@@ -918,6 +896,17 @@ def main():
 
             if reset_success:
                 print_success(f"Base de datos remota para el proyecto '{project_ref}' reseteada exitosamente.")
+                # Eliminar el directorio de migraciones local para forzar una creación limpia
+                if os.path.isdir(MIGRATIONS_DIR):
+                    try:
+                        shutil.rmtree(MIGRATIONS_DIR)
+                        print_info(f"Directorio de migraciones local '{MIGRATIONS_DIR}' eliminado para asegurar un inicio limpio.")
+                        # Recrear el directorio de migraciones vacío para que `create_migration_from_init_sql` funcione
+                        os.makedirs(MIGRATIONS_DIR, exist_ok=True)
+                        print_info(f"Directorio de migraciones local '{MIGRATIONS_DIR}' recreado vacío.")
+                    except Exception as e_rm:
+                        print_error(f"No se pudo eliminar o recrear el directorio de migraciones local '{MIGRATIONS_DIR}': {e_rm}")
+                        print_warning("Continuando de todas formas, pero podrían surgir problemas con migraciones antiguas.")
             else:
                 print_error(f"Falló el reseteo de la base de datos remota para '{project_ref}'. Detalle: {reset_stderr}")
                 print_warning("Las migraciones NO se aplicarán debido al fallo en el reseteo.")
@@ -926,15 +915,24 @@ def main():
             print_info("Reseteo de la base de datos remota omitido por el usuario.")
         # --- Fin de la lógica de reseteo ---
 
-        if apply_migrations(project_ref, supabase_executable_to_use, db_password_from_link=session_db_password):
-            print_success("¡Proceso de configuración de Supabase completado!")
-            print_info("Recuerda verificar tu dashboard de Supabase para confirmar que todo está como esperas.")
-        else:
-            print_error("La configuración de Supabase falló durante la aplicación de migraciones.")
-            print_info("Revisa los logs y el dashboard de Supabase.")
+    # Moved the migration creation and application logic to be inside the `if confirm_apply == 's':` block
+    # This ensures it only runs if the user initially agreed to apply migrations.
+
+    # Crear la migración DESPUÉS del posible reseteo y limpieza de migraciones locales
+    if not create_migration_from_init_sql(): # This will now create a fresh migration if migrations dir was cleared
+        print_error("Falló la creación del archivo de migración inicial. No se puede continuar con 'db push'.")
+        return
+
+    if apply_migrations(project_ref, supabase_executable_to_use, db_password_from_link=session_db_password):
+        print_success("¡Proceso de configuración de Supabase completado!")
+        print_info("Recuerda verificar tu dashboard de Supabase para confirmar que todo está como esperas.")
     else:
-        print_info("Aplicación de migraciones cancelada por el usuario.")
-        print_info(f"Puedes aplicar las migraciones manualmente ejecutando 'supabase db push' en la terminal, desde la raíz de tu proyecto.")
+        print_error("La configuración de Supabase falló durante la aplicación de migraciones.")
+        print_info("Revisa los logs y el dashboard de Supabase.")
+
+else: # This else corresponds to `if confirm_apply == 's':`
+    print_info("Aplicación de migraciones cancelada por el usuario.")
+    print_info(f"Puedes aplicar las migraciones manualmente ejecutando '{os.path.basename(supabase_executable_to_use)} db push' en tu terminal, desde la raíz de tu proyecto.")
 
 if __name__ == "__main__":
     main()
