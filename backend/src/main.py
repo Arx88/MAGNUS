@@ -47,7 +47,25 @@ def create_app():
     
     # Configuración de archivos
     app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER', '/tmp/manus-uploads')
-    app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('MAX_CONTENT_LENGTH', '104857600'))  # 100MB
+
+    # Configuración de tamaño máximo de archivo
+    def parse_size(size_str):
+        size_str = size_str.upper()
+        if size_str.endswith('KB'):
+            return int(size_str[:-2]) * 1024
+        elif size_str.endswith('MB'):
+            return int(size_str[:-2]) * 1024 * 1024
+        elif size_str.endswith('GB'):
+            return int(size_str[:-2]) * 1024 * 1024 * 1024
+        elif size_str.isdigit():
+            return int(size_str)
+        else:
+            # Default to 100MB if parsing fails
+            logger.warning(f"Could not parse MAX_CONTENT_LENGTH value '{size_str}'. Defaulting to 100MB.")
+            return 100 * 1024 * 1024
+
+    max_content_length_str = os.environ.get('MAX_CONTENT_LENGTH', '100MB')
+    app.config['MAX_CONTENT_LENGTH'] = parse_size(max_content_length_str)
     
     # Habilitar CORS para todas las rutas
     CORS(app, origins="*", supports_credentials=True)
