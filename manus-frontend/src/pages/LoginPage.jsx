@@ -18,7 +18,7 @@ export default function LoginPage() {
 
   // Login form state
   const [loginForm, setLoginForm] = useState({
-    username: '',
+    email: '', // Changed from username to email
     password: ''
   })
 
@@ -38,7 +38,7 @@ export default function LoginPage() {
 
     try {
       const result = await login({
-        username: loginForm.username,
+        email: loginForm.email, // Changed from username to email
         password: loginForm.password
       })
 
@@ -163,13 +163,13 @@ export default function LoginPage() {
               <TabsContent value="login" className="space-y-4 mt-4">
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="login-username">Usuario</Label>
+                    <Label htmlFor="login-email">Email</Label>
                     <Input
-                      id="login-username"
-                      type="text"
-                      placeholder="Ingresa tu usuario"
-                      value={loginForm.username}
-                      onChange={(e) => updateLoginForm('username', e.target.value)}
+                      id="login-email"
+                      type="email"
+                      placeholder="tu@email.com"
+                      value={loginForm.email}
+                      onChange={(e) => updateLoginForm('email', e.target.value)}
                       required
                       disabled={loading}
                     />
