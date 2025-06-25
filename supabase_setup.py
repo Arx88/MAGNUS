@@ -530,32 +530,64 @@ def initialize_supabase_project_if_needed(supabase_cmd="supabase"):
 
 def get_project_ref():
     print_info("Obteniendo referencia del proyecto Supabase (PROJECT_REF)...")
+    project_id = None
     if os.path.exists(CONFIG_FILE_PATH):
-        try:
-            config = configparser.ConfigParser()
-            if os.path.getsize(CONFIG_FILE_PATH) > 0:
+        if os.path.getsize(CONFIG_FILE_PATH) > 0:
+            # Intento 1: Usar ConfigParser
+            try:
+                config = configparser.ConfigParser()
                 config.read(CONFIG_FILE_PATH)
-                project_id = None
-                if 'project_id' in config and 'id' in config['project_id']:
-                    project_id = config['project_id']['id']
-                if not project_id:
+                if config.has_section('project_id') and config.has_option('project_id', 'id'):
+                    project_id = config.get('project_id', 'id')
+                elif config.has_option(config.default_section, 'project_id'):
+                    project_id = config.get(config.default_section, 'project_id')
+
+                if project_id:
+                    # Quitar comillas si configparser las incluyó (a veces pasa con get)
+                    if (project_id.startswith('"') and project_id.endswith('"')) or \
+                       (project_id.startswith("'") and project_id.endswith("'")):
+                        project_id = project_id[1:-1]
+                    print_success(f"PROJECT_REF encontrado en '{CONFIG_FILE_PATH}' (via configparser): {project_id}")
+                    return project_id
+            except configparser.Error as e_cfg:
+                print_info(f"Lectura con configparser de '{CONFIG_FILE_PATH}' falló o no encontró project_id ({e_cfg}). Intentando lectura manual.")
+
+            # Intento 2: Lectura manual (fallback si configparser falló o no encontró)
+            if not project_id:
+                try:
                     with open(CONFIG_FILE_PATH, 'r') as f_config:
                         for line in f_config:
-                            line_strip = line.strip()
-                            if line_strip.startswith('project_id'):
-                                parts = line_strip.split('=', 1)
-                                if len(parts) == 2:
-                                    project_id = parts[1].strip().replace('"', '').replace("'", "")
-                                    break
-                if project_id:
-                    print_success(f"PROJECT_REF encontrado en '{CONFIG_FILE_PATH}': {project_id}")
-                    return project_id
-                else:
-                    print_warning(f"No se pudo extraer 'project_id' de '{CONFIG_FILE_PATH}' con los formatos esperados.")
-            else:
-                print_warning(f"El archivo '{CONFIG_FILE_PATH}' está vacío.")
-        except Exception as e:
-            print_warning(f"No se pudo leer el PROJECT_REF de '{CONFIG_FILE_PATH}': {e}")
+                            line = line.strip()
+                            if line.startswith('#') or '=' not in line: # Ignorar comentarios y líneas sin '='
+                                continue
+
+                            key, value_str = line.split('=', 1)
+                            key = key.strip()
+                            value_str = value_str.strip()
+
+                            if key == 'project_id' or key == 'project-id':
+                                # Quitar comillas
+                                if (value_str.startswith('"') and value_str.endswith('"')) or \
+                                   (value_str.startswith("'") and value_str.endswith("'")):
+                                    project_id = value_str[1:-1]
+                                else:
+                                    project_id = value_str
+
+                                if project_id:
+                                    print_success(f"PROJECT_REF encontrado en '{CONFIG_FILE_PATH}' (lectura manual): {project_id}")
+                                    return project_id
+                    if not project_id:
+                        print_warning(f"No se pudo extraer 'project_id' de '{CONFIG_FILE_PATH}' mediante lectura manual (línea no encontrada o formato incorrecto).")
+                except Exception as e_manual:
+                    print_warning(f"Error durante la lectura manual de '{CONFIG_FILE_PATH}': {e_manual}")
+        else:
+            print_warning(f"El archivo '{CONFIG_FILE_PATH}' está vacío.")
+    else:
+        print_info(f"El archivo de configuración '{CONFIG_FILE_PATH}' no existe. No se intentará leer de él.")
+
+    # Si no se encontró el ID por ningún método automático o el archivo no existe
+    if not project_id:
+        print_info("No se pudo obtener el PROJECT_REF del archivo de configuración.")
 
     project_ref_input = input("Introduce tu PROJECT_REF de Supabase (lo encuentras en Configuración > General de tu dashboard): ").strip()
     if not project_ref_input:
@@ -567,7 +599,12 @@ def link_project(project_ref, supabase_cmd="supabase"):
     print_info(f"Vinculando con el proyecto Supabase: {project_ref}...")
     # Usar os.path.basename(supabase_cmd) para mensajes si es una ruta larga
     link_command_list = [supabase_cmd, "link", "--project-ref", project_ref]
-    success, stdout, stderr = run_command(link_command_list, supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None)
+    # Aumentar timeout a 180s
+    success, stdout, stderr = run_command(
+        link_command_list,
+        timeout=180,
+        supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None
+    )
     if success:
         print_success(f"Proyecto vinculado exitosamente con {project_ref}.")
         return True
