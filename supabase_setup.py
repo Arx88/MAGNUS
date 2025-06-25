@@ -603,19 +603,45 @@ def link_project(project_ref, supabase_cmd="supabase"):
     success, stdout, stderr = run_command(
         link_command_list,
         timeout=180,
-        supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None
+        supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None,
+        check=False # Permitir que analicemos el error nosotros mismos
     )
+
     if success:
         print_success(f"Proyecto vinculado exitosamente con {project_ref}.")
         return True
     else:
-        if "already linked to project" in stderr.lower() and project_ref in stderr.lower():
+        # Analizar stderr para dar mejores mensajes
+        stderr_lower = stderr.lower()
+        link_command_str = ' '.join(link_command_list)
+
+        if "already linked to project" in stderr_lower and project_ref in stderr_lower:
             print_success(f"El proyecto ya está vinculado con {project_ref}. Continuando...")
             return True
-        elif "config file differs" in stderr.lower():
-             print_warning(f"El project ID en {CONFIG_FILE_PATH} difiere del proporcionado.")
-             print_info("Por favor, resuelve esto manualmente o ejecuta 'supabase link --project-ref TU_PROJECT_ID --force' si es necesario.")
-        return False
+        elif "config file differs" in stderr_lower:
+            print_warning(f"El project ID en {CONFIG_FILE_PATH} difiere del proporcionado para el comando '{link_command_str}'.")
+            print_info("Por favor, resuelve esto manualmente o considera usar el flag --force si estás seguro (ej. 'supabase link --project-ref TU_PROJECT_ID --force').")
+            # Nota: El script actual no añade --force automáticamente para link.
+            return False
+        elif "timed out" in stderr_lower or (not success and not stderr.strip() and not stdout.strip()):
+            # El segundo caso es si success es False pero no hay stderr ni stdout,
+            # lo que puede suceder si el proceso se cuelga y run_command lo mata por timeout sin que el proceso hijo escriba nada.
+            print_error(f"El comando '{link_command_str}' falló, muy probablemente por timeout o porque está esperando un input interactivo (como la contraseña de la base de datos).")
+            print_info("\nRecomendaciones:")
+            print_info(f"  1. Intenta ejecutar el comando '{link_command_str}' manualmente en tu terminal.")
+            print_info(f"     Esto te permitirá ver si aparece algún prompt (por ejemplo, para la contraseña de la base de datos) y responderlo.")
+            print_info(f"  2. Si se te solicita una contraseña y deseas automatizar esto en futuras ejecuciones:")
+            print_info(f"     Puedes configurar la variable de entorno SUPABASE_DB_PASSWORD con la contraseña de tu base de datos antes de ejecutar este script.")
+            print_info(f"     El comando 'link' podría omitir el prompt de contraseña si esta variable está configurada.")
+            print_info(f"  3. Verifica tu conexión a internet y que el proyecto Supabase '{project_ref}' esté accesible.")
+            if stderr.strip(): print_warning(f"  Detalle del error (stderr): {stderr.strip()}")
+            if stdout.strip(): print_info(f"  Salida (stdout): {stdout.strip()}")
+            return False
+        else: # Otro tipo de error
+            print_error(f"Error al ejecutar '{link_command_str}'.")
+            if stdout.strip(): print_info(f"  Salida (stdout): {stdout.strip()}")
+            if stderr.strip(): print_warning(f"  Salida (stderr): {stderr.strip()}")
+            return False
 
 def create_migration_from_init_sql():
     print_info(f"Creando archivo de migración desde '{INIT_SQL_FILE}'...")
