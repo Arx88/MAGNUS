@@ -6,7 +6,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
 -- Tabla de usuarios (extiende auth.users de Supabase)
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) UNIQUE NOT NULL,
     username VARCHAR(100) UNIQUE NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE users (
 );
 
 -- Tabla de agentes
-CREATE TABLE agents (
+CREATE TABLE IF NOT EXISTS agents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
     description TEXT,
@@ -40,7 +40,7 @@ CREATE TABLE agents (
 );
 
 -- Tabla de conversaciones
-CREATE TABLE conversations (
+CREATE TABLE IF NOT EXISTS conversations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title VARCHAR(255),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -52,7 +52,7 @@ CREATE TABLE conversations (
 );
 
 -- Tabla de mensajes
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
@@ -64,7 +64,7 @@ CREATE TABLE messages (
 );
 
 -- Tabla de tareas
-CREATE TABLE tasks (
+CREATE TABLE IF NOT EXISTS tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
@@ -83,7 +83,7 @@ CREATE TABLE tasks (
 );
 
 -- Tabla de herramientas
-CREATE TABLE tools (
+CREATE TABLE IF NOT EXISTS tools (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) UNIQUE NOT NULL,
     display_name VARCHAR(255) NOT NULL,
@@ -101,7 +101,7 @@ CREATE TABLE tools (
 );
 
 -- Tabla de ejecuciones de herramientas
-CREATE TABLE tool_executions (
+CREATE TABLE IF NOT EXISTS tool_executions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
@@ -116,7 +116,7 @@ CREATE TABLE tool_executions (
 );
 
 -- Tabla de archivos
-CREATE TABLE files (
+CREATE TABLE IF NOT EXISTS files (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
     task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
@@ -133,7 +133,7 @@ CREATE TABLE files (
 );
 
 -- Tabla de configuración del sistema
-CREATE TABLE system_config (
+CREATE TABLE IF NOT EXISTS system_config (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     config_key VARCHAR(255) UNIQUE NOT NULL,
     config_value JSONB NOT NULL,
@@ -145,7 +145,7 @@ CREATE TABLE system_config (
 );
 
 -- Tabla de logs de auditoría
-CREATE TABLE audit_logs (
+CREATE TABLE IF NOT EXISTS audit_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     action VARCHAR(100) NOT NULL,
@@ -159,56 +159,56 @@ CREATE TABLE audit_logs (
 );
 
 -- Crear índices para optimización
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_username ON users(username);
-CREATE INDEX idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 
-CREATE INDEX idx_agents_created_by ON agents(created_by);
-CREATE INDEX idx_agents_is_public ON agents(is_public);
-CREATE INDEX idx_agents_is_active ON agents(is_active);
+CREATE INDEX IF NOT EXISTS idx_agents_created_by ON agents(created_by);
+CREATE INDEX IF NOT EXISTS idx_agents_is_public ON agents(is_public);
+CREATE INDEX IF NOT EXISTS idx_agents_is_active ON agents(is_active);
 
-CREATE INDEX idx_conversations_user_id ON conversations(user_id);
-CREATE INDEX idx_conversations_agent_id ON conversations(agent_id);
-CREATE INDEX idx_conversations_status ON conversations(status);
-CREATE INDEX idx_conversations_created_at ON conversations(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_agent_id ON conversations(agent_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status);
+CREATE INDEX IF NOT EXISTS idx_conversations_created_at ON conversations(created_at DESC);
 
-CREATE INDEX idx_messages_conversation_id ON messages(conversation_id);
-CREATE INDEX idx_messages_role ON messages(role);
-CREATE INDEX idx_messages_created_at ON messages(created_at);
-CREATE INDEX idx_messages_conversation_created ON messages(conversation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_messages_role ON messages(role);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at DESC);
 
-CREATE INDEX idx_tasks_conversation_id ON tasks(conversation_id);
-CREATE INDEX idx_tasks_status ON tasks(status);
-CREATE INDEX idx_tasks_priority ON tasks(priority);
-CREATE INDEX idx_tasks_created_at ON tasks(created_at DESC);
-CREATE INDEX idx_tasks_status_priority ON tasks(status, priority DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_conversation_id ON tasks(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
+CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_status_priority ON tasks(status, priority DESC);
 
-CREATE INDEX idx_tools_name ON tools(name);
-CREATE INDEX idx_tools_category ON tools(category);
-CREATE INDEX idx_tools_is_enabled ON tools(is_enabled);
+CREATE INDEX IF NOT EXISTS idx_tools_name ON tools(name);
+CREATE INDEX IF NOT EXISTS idx_tools_category ON tools(category);
+CREATE INDEX IF NOT EXISTS idx_tools_is_enabled ON tools(is_enabled);
 
-CREATE INDEX idx_tool_executions_task_id ON tool_executions(task_id);
-CREATE INDEX idx_tool_executions_tool_id ON tool_executions(tool_id);
-CREATE INDEX idx_tool_executions_status ON tool_executions(status);
-CREATE INDEX idx_tool_executions_tool_status ON tool_executions(tool_id, status);
+CREATE INDEX IF NOT EXISTS idx_tool_executions_task_id ON tool_executions(task_id);
+CREATE INDEX IF NOT EXISTS idx_tool_executions_tool_id ON tool_executions(tool_id);
+CREATE INDEX IF NOT EXISTS idx_tool_executions_status ON tool_executions(status);
+CREATE INDEX IF NOT EXISTS idx_tool_executions_tool_status ON tool_executions(tool_id, status);
 
-CREATE INDEX idx_files_conversation_id ON files(conversation_id);
-CREATE INDEX idx_files_task_id ON files(task_id);
-CREATE INDEX idx_files_uploaded_by ON files(uploaded_by);
-CREATE INDEX idx_files_expires_at ON files(expires_at);
-CREATE INDEX idx_files_conversation_temporary ON files(conversation_id, is_temporary);
+CREATE INDEX IF NOT EXISTS idx_files_conversation_id ON files(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_files_task_id ON files(task_id);
+CREATE INDEX IF NOT EXISTS idx_files_uploaded_by ON files(uploaded_by);
+CREATE INDEX IF NOT EXISTS idx_files_expires_at ON files(expires_at);
+CREATE INDEX IF NOT EXISTS idx_files_conversation_temporary ON files(conversation_id, is_temporary);
 
-CREATE INDEX idx_system_config_key ON system_config(config_key);
+CREATE INDEX IF NOT EXISTS idx_system_config_key ON system_config(config_key);
 
-CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id);
-CREATE INDEX idx_audit_logs_action ON audit_logs(action);
-CREATE INDEX idx_audit_logs_resource_type ON audit_logs(resource_type);
-CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_resource_type ON audit_logs(resource_type);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
 
 -- Índices para búsqueda de texto
-CREATE INDEX idx_conversations_title_gin ON conversations USING gin(to_tsvector('spanish', title));
-CREATE INDEX idx_messages_content_gin ON messages USING gin(to_tsvector('spanish', content));
-CREATE INDEX idx_tasks_title_description_gin ON tasks USING gin(to_tsvector('spanish', title || ' ' || COALESCE(description, '')));
+CREATE INDEX IF NOT EXISTS idx_conversations_title_gin ON conversations USING gin(to_tsvector('spanish', title));
+CREATE INDEX IF NOT EXISTS idx_messages_content_gin ON messages USING gin(to_tsvector('spanish', content));
+CREATE INDEX IF NOT EXISTS idx_tasks_title_description_gin ON tasks USING gin(to_tsvector('spanish', title || ' ' || COALESCE(description, '')));
 
 -- Función para actualizar updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -220,31 +220,37 @@ END;
 $$ language 'plpgsql';
 
 -- Triggers para actualización automática
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
 CREATE TRIGGER update_users_updated_at 
     BEFORE UPDATE ON users 
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_agents_updated_at ON agents;
 CREATE TRIGGER update_agents_updated_at 
     BEFORE UPDATE ON agents 
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_conversations_updated_at ON conversations;
 CREATE TRIGGER update_conversations_updated_at 
     BEFORE UPDATE ON conversations 
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_tasks_updated_at ON tasks;
 CREATE TRIGGER update_tasks_updated_at 
     BEFORE UPDATE ON tasks 
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_tools_updated_at ON tools;
 CREATE TRIGGER update_tools_updated_at 
     BEFORE UPDATE ON tools 
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_system_config_updated_at ON system_config;
 CREATE TRIGGER update_system_config_updated_at 
     BEFORE UPDATE ON system_config 
     FOR EACH ROW 
@@ -259,12 +265,15 @@ ALTER TABLE tool_executions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE files ENABLE ROW LEVEL SECURITY;
 
 -- Políticas de seguridad para users
+DROP POLICY IF EXISTS "Users can view own profile" ON users;
 CREATE POLICY "Users can view own profile" ON users
     FOR SELECT USING (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users can update own profile" ON users;
 CREATE POLICY "Users can update own profile" ON users
     FOR UPDATE USING (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Admins can view all users" ON users;
 CREATE POLICY "Admins can view all users" ON users
     FOR SELECT USING (
         EXISTS (
@@ -274,16 +283,20 @@ CREATE POLICY "Admins can view all users" ON users
     );
 
 -- Políticas para conversations
+DROP POLICY IF EXISTS "Users can view own conversations" ON conversations;
 CREATE POLICY "Users can view own conversations" ON conversations
     FOR SELECT USING (user_id = auth.uid());
 
+DROP POLICY IF EXISTS "Users can create conversations" ON conversations;
 CREATE POLICY "Users can create conversations" ON conversations
     FOR INSERT WITH CHECK (user_id = auth.uid());
 
+DROP POLICY IF EXISTS "Users can update own conversations" ON conversations;
 CREATE POLICY "Users can update own conversations" ON conversations
     FOR UPDATE USING (user_id = auth.uid());
 
 -- Políticas para messages
+DROP POLICY IF EXISTS "Users can view messages from own conversations" ON messages;
 CREATE POLICY "Users can view messages from own conversations" ON messages
     FOR SELECT USING (
         EXISTS (
@@ -292,6 +305,7 @@ CREATE POLICY "Users can view messages from own conversations" ON messages
         )
     );
 
+DROP POLICY IF EXISTS "Users can create messages in own conversations" ON messages;
 CREATE POLICY "Users can create messages in own conversations" ON messages
     FOR INSERT WITH CHECK (
         EXISTS (
@@ -301,6 +315,7 @@ CREATE POLICY "Users can create messages in own conversations" ON messages
     );
 
 -- Políticas para tasks
+DROP POLICY IF EXISTS "Users can view tasks from own conversations" ON tasks;
 CREATE POLICY "Users can view tasks from own conversations" ON tasks
     FOR SELECT USING (
         EXISTS (
@@ -309,6 +324,7 @@ CREATE POLICY "Users can view tasks from own conversations" ON tasks
         )
     );
 
+DROP POLICY IF EXISTS "Users can create tasks in own conversations" ON tasks;
 CREATE POLICY "Users can create tasks in own conversations" ON tasks
     FOR INSERT WITH CHECK (
         EXISTS (
@@ -317,6 +333,7 @@ CREATE POLICY "Users can create tasks in own conversations" ON tasks
         )
     );
 
+DROP POLICY IF EXISTS "Users can update tasks in own conversations" ON tasks;
 CREATE POLICY "Users can update tasks in own conversations" ON tasks
     FOR UPDATE USING (
         EXISTS (
@@ -326,6 +343,7 @@ CREATE POLICY "Users can update tasks in own conversations" ON tasks
     );
 
 -- Políticas para tool_executions
+DROP POLICY IF EXISTS "Users can view tool executions from own tasks" ON tool_executions;
 CREATE POLICY "Users can view tool executions from own tasks" ON tool_executions
     FOR SELECT USING (
         EXISTS (
@@ -336,6 +354,7 @@ CREATE POLICY "Users can view tool executions from own tasks" ON tool_executions
     );
 
 -- Políticas para files
+DROP POLICY IF EXISTS "Users can view files from own conversations" ON files;
 CREATE POLICY "Users can view files from own conversations" ON files
     FOR SELECT USING (
         EXISTS (
@@ -344,6 +363,7 @@ CREATE POLICY "Users can view files from own conversations" ON files
         )
     );
 
+DROP POLICY IF EXISTS "Users can upload files to own conversations" ON files;
 CREATE POLICY "Users can upload files to own conversations" ON files
     FOR INSERT WITH CHECK (
         uploaded_by = auth.uid() AND
@@ -354,7 +374,7 @@ CREATE POLICY "Users can upload files to own conversations" ON files
     );
 
 -- Vistas útiles
-CREATE VIEW conversation_details AS
+CREATE OR REPLACE VIEW conversation_details AS
 SELECT 
     c.id,
     c.title,
@@ -371,7 +391,7 @@ FROM conversations c
 JOIN users u ON c.user_id = u.id
 JOIN agents a ON c.agent_id = a.id;
 
-CREATE VIEW tool_statistics AS
+CREATE OR REPLACE VIEW tool_statistics AS
 SELECT 
     t.id,
     t.name,
