@@ -870,11 +870,13 @@ def main():
         print_error("No se pudo asegurar el vínculo con el proyecto Supabase. Saliendo.")
         return
 
-    if not create_migration_from_init_sql():
-        return
+    # This was called too early before, now it's correctly placed before asking to apply migrations,
+    # but after link and other essential checks.
+    # However, the actual creation of migration file from SQL should only happen if the user confirms
+    # they want to apply migrations, and potentially after a reset.
+    # So, the call to `create_migration_from_init_sql` is moved further down.
 
-    confirm_apply = input(f"\n¿Estás listo para aplicar las migraciones (incluyendo '{INIT_SQL_FILE}') a tu proyecto Supabase '{project_ref}'? (s/N): ").strip().lower()
-    confirm_apply = input(f"\n¿Estás listo para aplicar las migraciones (incluyendo '{INIT_SQL_FILE}') a tu proyecto Supabase '{project_ref}'? (s/N): ").strip().lower()
+    confirm_apply = input(f"\n¿Estás listo para aplicar las migraciones (basadas en '{INIT_SQL_FILE}') a tu proyecto Supabase '{project_ref}'? (s/N): ").strip().lower()
     if confirm_apply == 's':
         # --- Preguntar por reseteo de base de datos ---
         confirm_reset = input(f"\n⚠️ ADVERTENCIA: ¿Quieres resetear la base de datos remota para el proyecto '{project_ref}' ANTES de aplicar las migraciones? \nESTO BORRARÁ TODOS LOS DATOS EN LA BASE DE DATOS REMOTA. Esta acción es irreversible. (yes/NO): ").strip().lower()
@@ -882,26 +884,23 @@ def main():
         if confirm_reset == 'yes':
             print_info(f"Intentando resetear la base de datos remota para el proyecto {project_ref}...")
 
-            # unknown flag: --password | El comando 'reset' no usa --password, se basa en el link previo.
             reset_command_list = [supabase_executable_to_use, "db", "reset", "--debug"]
             print_info(f"Ejecutando: {' '.join(reset_command_list)}")
 
             reset_success, _, reset_stderr = run_command(
                 reset_command_list,
-                timeout=300, # Timeout más corto para reset que para push
+                timeout=300,
                 suppress_output=False,
                 supabase_executable_path=supabase_executable_to_use if supabase_executable_to_use != "supabase" else None,
-                check=False # Manejar el fallo manualmente
+                check=False
             )
 
             if reset_success:
                 print_success(f"Base de datos remota para el proyecto '{project_ref}' reseteada exitosamente.")
-                # Eliminar el directorio de migraciones local para forzar una creación limpia
                 if os.path.isdir(MIGRATIONS_DIR):
                     try:
                         shutil.rmtree(MIGRATIONS_DIR)
                         print_info(f"Directorio de migraciones local '{MIGRATIONS_DIR}' eliminado para asegurar un inicio limpio.")
-                        # Recrear el directorio de migraciones vacío para que `create_migration_from_init_sql` funcione
                         os.makedirs(MIGRATIONS_DIR, exist_ok=True)
                         print_info(f"Directorio de migraciones local '{MIGRATIONS_DIR}' recreado vacío.")
                     except Exception as e_rm:
@@ -910,29 +909,28 @@ def main():
             else:
                 print_error(f"Falló el reseteo de la base de datos remota para '{project_ref}'. Detalle: {reset_stderr}")
                 print_warning("Las migraciones NO se aplicarán debido al fallo en el reseteo.")
-                return # Salir de main si el reseteo falló y era deseado
+                return
         else:
             print_info("Reseteo de la base de datos remota omitido por el usuario.")
         # --- Fin de la lógica de reseteo ---
 
-    # Moved the migration creation and application logic to be inside the `if confirm_apply == 's':` block
-    # This ensures it only runs if the user initially agreed to apply migrations.
+        # Crear la migración DESPUÉS del posible reseteo y limpieza de migraciones locales
+        # y solo si el usuario confirmó que quiere aplicar migraciones.
+        print_info("Preparando archivo de migración...")
+        if not create_migration_from_init_sql():
+            print_error("Falló la creación del archivo de migración inicial. No se puede continuar con 'db push'.")
+            return
 
-    # Crear la migración DESPUÉS del posible reseteo y limpieza de migraciones locales
-    if not create_migration_from_init_sql(): # This will now create a fresh migration if migrations dir was cleared
-        print_error("Falló la creación del archivo de migración inicial. No se puede continuar con 'db push'.")
-        return
-
-    if apply_migrations(project_ref, supabase_executable_to_use, db_password_from_link=session_db_password):
-        print_success("¡Proceso de configuración de Supabase completado!")
-        print_info("Recuerda verificar tu dashboard de Supabase para confirmar que todo está como esperas.")
+        print_info("Procediendo a aplicar migraciones...")
+        if apply_migrations(project_ref, supabase_executable_to_use, db_password_from_link=session_db_password):
+            print_success("¡Proceso de configuración de Supabase completado!")
+            print_info("Recuerda verificar tu dashboard de Supabase para confirmar que todo está como esperas.")
+        else:
+            print_error("La configuración de Supabase falló durante la aplicación de migraciones.")
+            print_info("Revisa los logs y el dashboard de Supabase.")
     else:
-        print_error("La configuración de Supabase falló durante la aplicación de migraciones.")
-        print_info("Revisa los logs y el dashboard de Supabase.")
-
-else: # This else corresponds to `if confirm_apply == 's':`
-    print_info("Aplicación de migraciones cancelada por el usuario.")
-    print_info(f"Puedes aplicar las migraciones manualmente ejecutando '{os.path.basename(supabase_executable_to_use)} db push' en tu terminal, desde la raíz de tu proyecto.")
+        print_info("Aplicación de migraciones cancelada por el usuario.")
+        print_info(f"Puedes aplicar las migraciones manualmente ejecutando '{os.path.basename(supabase_executable_to_use)} db push' en tu terminal, desde la raíz de tu proyecto.")
 
 if __name__ == "__main__":
     main()
