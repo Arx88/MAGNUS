@@ -897,6 +897,45 @@ def main():
 
             if reset_success:
                 print_success(f"Base de datos remota para el proyecto '{project_ref}' reseteada exitosamente.")
+
+                # Attempt to repair the known problematic old migration version
+                # This version was identified from previous error logs.
+                # NOTE: If other "ghost" remote migrations exist, they might need manual repair
+                # or a more dynamic way to list and repair all unlinked remote migrations.
+                problematic_old_migration_version = "20250625043537" # From logs
+                print_info(f"Intentando reparar la migración remota '{problematic_old_migration_version}' marcándola como 'reverted'...")
+                repair_command_list = [
+                    supabase_executable_to_use,
+                    "migration", "repair",
+                    "--status", "reverted", problematic_old_migration_version
+                ]
+                # The repair command might also prompt for confirmation interactively.
+                # We add --confirm flag if available, but older CLIs might not support it.
+                # For now, let's assume it either works or the user might see a prompt.
+                # A more robust solution would check CLI version for --confirm support.
+                # repair_command_list.append("--confirm") # Add this if you know your CLI version supports it non-interactively
+
+                print_info(f"Ejecutando: {' '.join(repair_command_list)}")
+                repair_success, repair_stdout, repair_stderr = run_command(
+                    repair_command_list,
+                    timeout=120,
+                    suppress_output=False, # Show output for repair
+                    supabase_executable_path=supabase_executable_to_use if supabase_executable_to_use != "supabase" else None,
+                    check=False # Handle status manually
+                )
+                if repair_success:
+                    print_success(f"Comando de reparación para '{problematic_old_migration_version}' ejecutado. Salida: {repair_stdout}")
+                    if "Successfully repaired migration" in repair_stdout or "No changes" in repair_stdout : # adapt based on actual success message
+                         print_success(f"Reparación de la migración '{problematic_old_migration_version}' parece haber sido exitosa o no necesaria.")
+                    elif repair_stderr and ("No rows changed" in repair_stderr or "migration not found" in repair_stderr.lower()):
+                         print_warning(f"La reparación para '{problematic_old_migration_version}' no afectó filas o no encontró la migración. Esto puede ser normal si ya estaba limpia. (stderr: {repair_stderr})")
+                    elif repair_stderr : # Other errors
+                         print_warning(f"Comando de reparación para '{problematic_old_migration_version}' tuvo errores/advertencias. stderr: {repair_stderr}")
+                else:
+                    print_warning(f"Falló la ejecución del comando de reparación para '{problematic_old_migration_version}'. stdout: {repair_stdout}, stderr: {repair_stderr}")
+                    print_warning("Se continuará con la limpieza de migraciones locales y el intento de 'db push', pero podrían persistir problemas.")
+
+                # Eliminar el directorio de migraciones local para forzar una creación limpia
                 if os.path.isdir(MIGRATIONS_DIR):
                     try:
                         shutil.rmtree(MIGRATIONS_DIR)
