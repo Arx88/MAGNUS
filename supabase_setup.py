@@ -443,25 +443,34 @@ def check_supabase_login(supabase_cmd="supabase"): # Añadir supabase_cmd
         print_info(f"Intentando ejecutar '{login_command_display} login' interactivamente...")
         print_info("Por favor, sigue las instrucciones en tu navegador para completar el login.")
 
-        # Intentar ejecutar 'supabase login --no-browser'
-        # No suprimir salida para que el usuario vea los prompts. check=False para manejar cancelación.
+        # Intentar ejecutar 'supabase login --no-browser' con salida directa a la consola
         login_command_to_run = [supabase_cmd, "login", "--no-browser"]
-        print_info(f"Ejecutando: {' '.join(login_command_to_run)}") # Para ver el comando exacto
-        login_success, login_stdout, login_stderr = run_command(
-            login_command_to_run,
-            suppress_output=False, # Mostrar salida de 'supabase login'
-            check=False, # No fallar el script si 'supabase login' devuelve error
-            timeout=300, # Dar tiempo suficiente para la interacción (si la hay)
-            supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None
-        )
+        print_info(f"Ejecutando: {' '.join(login_command_to_run)}")
+        print_info("Se espera que este comando imprima una URL. Copia esa URL en tu navegador, completa el login, y luego pega el token de acceso que te proporcione la web de Supabase aquí en la consola si el comando lo solicita.")
 
-        if login_success: # Esto significa que 'supabase login --no-browser' devolvió código 0
-            print_success(f"'{' '.join(login_command_to_run)}' se ejecutó y devolvió éxito (código 0).")
-            # Es posible que '--no-browser' aún requiera que el usuario haga algo
-            # (como copiar una URL, loguearse, y luego la CLI detecte el token de alguna manera, o espere que se pegue).
-            # La re-verificación es crucial.
+        login_success = False
+        try:
+            # Llamada directa a subprocess.run para permitir salida directa a la consola
+            # No se usa capture_output=True, por lo que stdout/stderr van a la consola.
+            process = subprocess.run(
+                login_command_to_run,
+                check=False, # El script manejará el código de retorno
+                timeout=300 # Timeout generoso para interacción del usuario
+            )
+            if process.returncode == 0:
+                login_success = True
+                print_success(f"'{' '.join(login_command_to_run)}' finalizó con código de salida 0.")
+            else:
+                print_error(f"'{' '.join(login_command_to_run)}' finalizó con código de salida {process.returncode}.")
+        except subprocess.TimeoutExpired:
+            print_error(f"El comando '{' '.join(login_command_to_run)}' tardó demasiado en responder (timeout: 300s).")
+            login_success = False
+        except Exception as e:
+            print_error(f"Error inesperado al ejecutar '{' '.join(login_command_to_run)}': {e}")
+            login_success = False
+
+        if login_success:
             print_info("Verificando estado de login en Supabase CLI (intento 2)...")
-            # Intento 2: Re-verificar después de 'supabase login'
             retry_success, _, retry_stderr = run_command(
                 [supabase_cmd, "projects", "list"],
                 suppress_output=True,
@@ -469,16 +478,16 @@ def check_supabase_login(supabase_cmd="supabase"): # Añadir supabase_cmd
             )
             if retry_success:
                 print_success("¡Login verificado exitosamente después del intento interactivo!")
-                return True # O SUPABASE_IN_PATH
+                return True
             else:
-                print_error(f"Falló la verificación del login después de intentar '{login_command_display} login'.")
-                print_info(f"Detalle del reintento: {retry_stderr}")
-                print_info(f"Asegúrate de haber completado el proceso de login en el navegador. Si el problema persiste, verifica tu conexión o intenta '{login_command_display} login' manualmente en la terminal.")
+                print_error(f"Falló la verificación del login después de ejecutar '{' '.join(login_command_to_run)}'.")
+                if retry_stderr: print_info(f"Detalle del reintento: {retry_stderr}")
+                print_info(f"Asegúrate de haber completado el proceso de login (copiar URL, autenticar, pegar token si es necesario). Si el problema persiste, intenta '{login_command_display} login' manualmente.")
                 return False
         else:
-            print_error(f"El comando '{login_command_display} login' no finalizó exitosamente o fue cancelado.")
-            if login_stderr: print_warning(f"Detalle del error de login: {login_stderr}")
-            print_info(f"Por favor, intenta ejecutar '{login_command_display} login' manualmente en tu terminal y luego vuelve a ejecutar este script.")
+            # login_success es False
+            print_error(f"El proceso para '{' '.join(login_command_to_run)}' no fue exitoso o fue cancelado/falló.")
+            print_info(f"Por favor, intenta ejecutar '{login_command_display} login --no-browser' manualmente en tu terminal, completa el proceso, y luego vuelve a ejecutar este script.")
             return False
     else:
         # El error original al listar proyectos no era por falta de login conocido
