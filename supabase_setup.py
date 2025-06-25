@@ -443,18 +443,23 @@ def check_supabase_login(supabase_cmd="supabase"): # Añadir supabase_cmd
         print_info(f"Intentando ejecutar '{login_command_display} login' interactivamente...")
         print_info("Por favor, sigue las instrucciones en tu navegador para completar el login.")
 
-        # Intentar ejecutar 'supabase login'
+        # Intentar ejecutar 'supabase login --no-browser'
         # No suprimir salida para que el usuario vea los prompts. check=False para manejar cancelación.
+        login_command_to_run = [supabase_cmd, "login", "--no-browser"]
+        print_info(f"Ejecutando: {' '.join(login_command_to_run)}") # Para ver el comando exacto
         login_success, login_stdout, login_stderr = run_command(
-            [supabase_cmd, "login"],
+            login_command_to_run,
             suppress_output=False, # Mostrar salida de 'supabase login'
-            check=False, # No fallar el script si 'supabase login' devuelve error (ej. usuario cancela)
-            timeout=300, # Dar tiempo suficiente para la interacción del navegador
+            check=False, # No fallar el script si 'supabase login' devuelve error
+            timeout=300, # Dar tiempo suficiente para la interacción (si la hay)
             supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None
         )
 
-        if login_success:
-            print_success(f"'{login_command_display} login' completado (o ya estabas logueado).")
+        if login_success: # Esto significa que 'supabase login --no-browser' devolvió código 0
+            print_success(f"'{' '.join(login_command_to_run)}' se ejecutó y devolvió éxito (código 0).")
+            # Es posible que '--no-browser' aún requiera que el usuario haga algo
+            # (como copiar una URL, loguearse, y luego la CLI detecte el token de alguna manera, o espere que se pegue).
+            # La re-verificación es crucial.
             print_info("Verificando estado de login en Supabase CLI (intento 2)...")
             # Intento 2: Re-verificar después de 'supabase login'
             retry_success, _, retry_stderr = run_command(
