@@ -759,7 +759,8 @@ def apply_migrations(project_ref, supabase_cmd="supabase", db_password_from_link
     print_info("Aplicando migraciones a la base de datos Supabase remota...")
     print_warning("Esto puede tardar unos momentos y aplicará CUALQUIER migración pendiente.")
 
-    command_list = [supabase_cmd, "db", "push"]
+    # Add --debug for more verbose output from the CLI
+    command_list = [supabase_cmd, "db", "push", "--debug"]
     password_source_for_push = None
 
     if db_password_from_link:
@@ -789,9 +790,8 @@ def apply_migrations(project_ref, supabase_cmd="supabase", db_password_from_link
 
     print_info(f"Ejecutando: {final_db_push_command_str} para el proyecto {project_ref}")
 
-    # Aumentar el timeout para db push, antes era 180s.
-    new_timeout = 360 # 6 minutos
-    print_info(f"Timeout para 'db push' configurado a {new_timeout} segundos.")
+    new_timeout = 1200  # 20 minutes
+    print_info(f"Timeout para 'db push' configurado a {new_timeout} segundos con --debug habilitado.")
     success, stdout, stderr = run_command(
         command_list,
         timeout=new_timeout,
