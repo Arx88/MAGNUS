@@ -743,8 +743,26 @@ def create_migration_from_init_sql():
         print_error(f"El directorio de migraciones '{MIGRATIONS_DIR}' no existe. Asegúrate de que 'supabase init' se haya ejecutado correctamente.")
         return False
 
+    # Check if an initial schema migration from today already exists
+    today_str = datetime.datetime.now().strftime('%Y%m%d')
+    suffix_to_check = "_initial_schema_from_script.sql"
+    try:
+        for existing_file in os.listdir(MIGRATIONS_DIR):
+            if existing_file.startswith(today_str) and existing_file.endswith(suffix_to_check):
+                print_info(f"Ya existe un archivo de migración inicial para hoy: '{existing_file}'. No se creará uno nuevo.")
+                print_warning("Se reintentará aplicar las migraciones existentes. Si la ejecución anterior falló a la mitad, la base de datos podría estar en un estado inconsistente.")
+                print_warning("Para un inicio limpio, considera resetear la base de datos remota y borrar los archivos de migración locales si es necesario.")
+                return True # Proceed assuming this existing migration will be picked up by `db push`
+    except FileNotFoundError:
+        # MIGRATIONS_DIR might not exist if init didn't run or was partial, though checked above.
+        # This specific check is for os.listdir, so if MIGRATIONS_DIR was created *after* the top check but before listdir.
+        pass # Fall through to creating the migration.
+    except Exception as e:
+        print_warning(f"Error al verificar migraciones existentes: {e}. Se intentará crear una nueva.")
+        # Fall through to creating the migration.
+
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-    migration_file_name = f"{timestamp}_initial_schema_from_script.sql"
+    migration_file_name = f"{timestamp}{suffix_to_check}" # Use the defined suffix
     migration_file_path = os.path.join(MIGRATIONS_DIR, migration_file_name)
 
     try:
