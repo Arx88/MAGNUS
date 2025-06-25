@@ -600,35 +600,33 @@ def link_project(project_ref, supabase_cmd="supabase"):
     print_info(f"Vinculando con el proyecto Supabase: {project_ref}...")
     link_command_list = [supabase_cmd, "link", "--project-ref", project_ref]
 
-    db_password = os.environ.get("SUPABASE_DB_PASSWORD")
+    db_password_env = os.environ.get("SUPABASE_DB_PASSWORD")
     password_source = ""
+    password_entered_by_user = None # Variable to store password if user types it
 
-    if db_password:
+    if db_password_env:
         print_info("Usando contraseña de la base de datos desde la variable de entorno SUPABASE_DB_PASSWORD.")
-        # La CLI debería recogerla automáticamente. Si `supabase link` still times out even with
-        # SUPABASE_DB_PASSWORD set, it might indicate an issue with the CLI version's
-        # handling of the env var, or another prompt. However, for now, we assume
-        # the CLI docs are accurate and it will use it.
-        password_source = "variable de entorno" # Explicitly set source
+        password_source = "variable de entorno"
+        # password_entered_by_user remains None because db_push can also check env var
     else:
         print_info("La variable de entorno SUPABASE_DB_PASSWORD no está configurada.")
         try:
-            # Usar input() para el mensaje y luego getpass() para la entrada real
-            # para asegurar que el mensaje se muestra incluso si getpass tiene problemas en algunos entornos.
             print_info("Por favor, introduce la contraseña de tu base de datos Supabase. Deja en blanco para omitir.")
-            db_password_input = getpass.getpass("Contraseña de la base de datos (se ocultará la entrada): ")
-            if db_password_input:
-                link_command_list.extend(["--password", db_password_input])
+            db_password_input_user = getpass.getpass("Contraseña de la base de datos (se ocultará la entrada): ")
+            if db_password_input_user:
+                link_command_list.extend(["--password", db_password_input_user])
                 password_source = "entrada del usuario"
+                password_entered_by_user = db_password_input_user # Store for returning
                 print_info("Contraseña proporcionada por el usuario.")
             else:
+                # password_entered_by_user remains None
                 print_info("No se proporcionó contraseña. El comando 'link' intentará continuar sin ella (puede omitir la validación de la BD o fallar si es obligatoria).")
         except Exception as e:
+            # password_entered_by_user remains None
             print_warning(f"No se pudo leer la contraseña de forma segura ({e}). El comando 'link' se ejecutará sin pasar una contraseña explícita.")
             print_info("Puedes configurar la variable de entorno SUPABASE_DB_PASSWORD para evitar este prompt.")
 
-    # Aumentar timeout a 180s, ya que el enlace puede llevar tiempo, especialmente la primera vez.
-    # El timeout original de 180s ya era generoso, mantenerlo.
+    # Mantenemos el timeout de 180s para link
     success, stdout, stderr = run_command(
         link_command_list,
         timeout=180, # Mantenemos el timeout de 180s
@@ -678,21 +676,23 @@ def link_project(project_ref, supabase_cmd="supabase"):
 
         except Exception as e_cfg_update:
             print_warning(f"No se pudo actualizar/crear '{CONFIG_FILE_PATH}' con el project_ref: {e_cfg_update}")
-        return True
+        return True, password_entered_by_user # Return password if link was successful
     else:
         # Analizar stderr para dar mejores mensajes
         stderr_lower = stderr.lower()
 
         if "already linked to project" in stderr_lower and project_ref in stderr_lower:
             print_success(f"El proyecto ya está vinculado con {project_ref}. Continuando...")
-            return True
+            # Si ya está vinculado, no tenemos una contraseña "recién introducida" para propagar,
+            # pero la operación de "asegurar el vínculo" es exitosa.
+            return True, None
         elif "config file differs" in stderr_lower:
             print_warning(f"El project ID en {CONFIG_FILE_PATH} difiere del proporcionado para el comando '{final_link_command_str}'.")
             print_info("Esto puede ocurrir si el archivo local ya está vinculado a otro proyecto.")
             print_info(f"El script intentó vincular con '{project_ref}'.")
             print_info(f"Puedes intentar '{supabase_cmd} unlink' y luego re-ejecutar este script,")
             print_info(f"o ejecutar '{supabase_cmd} link --project-ref {project_ref} --force' manualmente si estás seguro.")
-            return False
+            return False, None
 
         is_timeout_error = "timeout (" in stderr_lower and "para el comando" in stderr_lower
         is_generic_timeout_message_from_cli = "operation timed out" in stderr_lower # Mensaje directo de la CLI
@@ -705,7 +705,7 @@ def link_project(project_ref, supabase_cmd="supabase"):
             print_info(f"  2. Intenta ejecutar el comando '{final_link_command_str}' manualmente en tu terminal para ver si hay más detalles.")
             if stderr.strip(): print_warning(f"  Detalle del error (stderr): {stderr.strip()}")
             if stdout.strip(): print_info(f"  Salida (stdout): {stdout.strip()}")
-            return False
+            return False, None
         # Si NO se proporcionó contraseña (o falló getpass) Y hay timeout, es probable que sea el prompt.
         elif (is_timeout_error or is_generic_timeout_message_from_cli) and not password_source:
             print_error(f"El comando '{final_link_command_str}' (sin contraseña explícita) falló, muy probablemente por timeout esperando un input interactivo (como la contraseña de la base de datos).")
@@ -716,7 +716,7 @@ def link_project(project_ref, supabase_cmd="supabase"):
             print_info(f"  3. Verifica tu conexión a internet y que el proyecto Supabase '{project_ref}' esté accesible.")
             if stderr.strip(): print_warning(f"  Detalle del error (stderr): {stderr.strip()}")
             if stdout.strip(): print_info(f"  Salida (stdout): {stdout.strip()}")
-            return False
+            return False, None
         else: # Otro tipo de error
             print_error(f"Error al ejecutar '{final_link_command_str}'.")
             if "authentication failed" in stderr_lower or "password authentication failed" in stderr_lower:
@@ -731,7 +731,7 @@ def link_project(project_ref, supabase_cmd="supabase"):
 
             if stdout.strip(): print_info(f"  Salida (stdout): {stdout.strip()}")
             if stderr.strip(): print_warning(f"  Salida (stderr): {stderr.strip()}")
-            return False
+            return False, None
 
 def create_migration_from_init_sql():
     print_info(f"Creando archivo de migración desde '{INIT_SQL_FILE}'...")
@@ -755,23 +755,26 @@ def create_migration_from_init_sql():
         print_error(f"No se pudo crear el archivo de migración: {e}")
         return False
 
-def apply_migrations(project_ref, supabase_cmd="supabase"):
+def apply_migrations(project_ref, supabase_cmd="supabase", db_password_from_link=None):
     print_info("Aplicando migraciones a la base de datos Supabase remota...")
     print_warning("Esto puede tardar unos momentos y aplicará CUALQUIER migración pendiente.")
 
     command_list = [supabase_cmd, "db", "push"]
+    password_source_for_push = None
 
-    # Check for SUPABASE_DB_PASSWORD env var again, as `db push` also has a -p flag
-    # This is a defense-in-depth measure.
-    db_password = os.environ.get("SUPABASE_DB_PASSWORD")
-    if db_password:
-        print_info("Usando contraseña de la variable de entorno SUPABASE_DB_PASSWORD para 'db push'.")
-        # Unlike `link`, `db push` might not automatically pick up the env var
-        # if it's not explicitly designed to, or if its primary way is through linked context.
-        # Adding it explicitly if the flag exists and env var is present.
-        command_list.extend(["--password", db_password])
+    if db_password_from_link:
+        print_info("Usando contraseña proporcionada durante el 'link' para 'db push'.")
+        command_list.extend(["--password", db_password_from_link])
+        password_source_for_push = "link step"
     else:
-        print_info("SUPABASE_DB_PASSWORD no está configurada. 'db push' se ejecutará sin pasar una contraseña explícita (confiando en la sesión de 'link').")
+        # db_password_from_link was None or empty, try environment variable
+        db_password_env = os.environ.get("SUPABASE_DB_PASSWORD")
+        if db_password_env:
+            print_info("Usando contraseña de la variable de entorno SUPABASE_DB_PASSWORD para 'db push'.")
+            command_list.extend(["--password", db_password_env])
+            password_source_for_push = "environment variable"
+        else:
+            print_info("No se proporcionó contraseña desde 'link' ni se encontró SUPABASE_DB_PASSWORD. 'db push' se ejecutará sin pasar una contraseña explícita (confiando en la sesión de 'link' o credenciales almacenadas).")
 
     # Usar os.path.basename(supabase_cmd) para mensajes si es una ruta larga
     # Ocultar la contraseña en el mensaje de log si se proporcionó
@@ -844,7 +847,8 @@ def main():
     if not project_ref:
         return
 
-    if not link_project(project_ref, supabase_executable_to_use):
+    link_success, session_db_password = link_project(project_ref, supabase_executable_to_use)
+    if not link_success:
         print_error("No se pudo asegurar el vínculo con el proyecto Supabase. Saliendo.")
         return
 
@@ -853,7 +857,7 @@ def main():
 
     confirm_apply = input(f"\n¿Estás listo para aplicar las migraciones (incluyendo '{INIT_SQL_FILE}') a tu proyecto Supabase '{project_ref}'? (s/N): ").strip().lower()
     if confirm_apply == 's':
-        if apply_migrations(project_ref, supabase_executable_to_use):
+        if apply_migrations(project_ref, supabase_executable_to_use, db_password_from_link=session_db_password):
             print_success("¡Proceso de configuración de Supabase completado!")
             print_info("Recuerda verificar tu dashboard de Supabase para confirmar que todo está como esperas.")
         else:
