@@ -1,0 +1,12 @@
+[2025-06-24 00:09:00] Test log entry from isolated block. If you see this, directory creation and initial file write worked.
+[2025-06-24 00:09:00] --- Iniciando ejecución directa de comandos (simulando start.bat) ---
+[2025-06-24 00:09:00] Verificando Docker...
+[2025-06-24 00:09:00] Docker check OK. Salida: Docker version 28.2.2, build e6534b4
+[2025-06-24 00:09:00] Verificación de Ollama (informativo): Se asume que Ollama está en ejecución si es necesario para los servicios de Docker.
+[2025-06-24 00:09:00] Creando red Docker mcp-network...
+[2025-06-24 00:09:00] Red mcp-network ya existía. Salida: Error response from daemon: network with name mcp-network already exists
+[2025-06-24 00:09:00] Ejecutando docker-compose up -d...
+[2025-06-24 00:09:00] CWD para docker-compose: D:\Magnus\MAGNUS
+[2025-06-24 00:09:00] La salida de docker-compose se guardará en: D:\Magnus\MAGNUS\logs\setup_docker_compose_output.log
+[2025-06-24 00:09:01] docker-compose up -d finalizado. Código de retorno: 0
+[2025-06-24 00:09:01] Salida de docker-compose escrita en D:\Magnus\MAGNUS\logs\setup_docker_compose_output.log.

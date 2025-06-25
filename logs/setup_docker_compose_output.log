@@ -1,0 +1,31 @@
+--- Comando: docker-compose up -d ---
+--- CWD: D:\Magnus\MAGNUS ---
+--- STDOUT ---
+[No stdout]
+
+--- STDERR ---
+time="2025-06-24T00:09:00+02:00" level=warning msg="D:\\Magnus\\MAGNUS\\docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+ Network magnus_manus-network  Creating
+ Network magnus_manus-network  Created
+ Container manus-postgres  Creating
+ Container manus-redis  Creating
+ Container manus-redis  Created
+ Container manus-postgres  Created
+ Container manus-backend  Creating
+ Container manus-backend  Created
+ Container manus-frontend  Creating
+ Container manus-frontend  Created
+ Container manus-nginx  Creating
+ Container manus-nginx  Created
+ Container manus-postgres  Starting
+ Container manus-redis  Starting
+ Container manus-redis  Started
+ Container manus-postgres  Started
+ Container manus-backend  Starting
+ Container manus-backend  Started
+ Container manus-frontend  Starting
+ Container manus-frontend  Started
+ Container manus-nginx  Starting
+ Container manus-nginx  Started
+
+--- Return Code: 0 ---
