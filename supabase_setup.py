@@ -11,6 +11,7 @@ import tarfile
 import stat # Para os.chmod
 import ctypes # Para verificar privilegios de administrador en Windows
 import sys # Para sys.exit()
+import getpass # Para solicitar contraseñas de forma segura
 
 # Constantes
 SUPABASE_IN_PATH = "supabase_found_in_path" # Constante para indicar que se usa la CLI del PATH
@@ -597,52 +598,153 @@ def get_project_ref():
 
 def link_project(project_ref, supabase_cmd="supabase"):
     print_info(f"Vinculando con el proyecto Supabase: {project_ref}...")
-    # Usar os.path.basename(supabase_cmd) para mensajes si es una ruta larga
     link_command_list = [supabase_cmd, "link", "--project-ref", project_ref]
-    # Aumentar timeout a 180s
+
+    db_password = os.environ.get("SUPABASE_DB_PASSWORD")
+    password_source = ""
+
+    if db_password:
+        print_info("Usando contraseña de la base de datos desde la variable de entorno SUPABASE_DB_PASSWORD.")
+        # La CLI debería recogerla automáticamente. Si `supabase link` still times out even with
+        # SUPABASE_DB_PASSWORD set, it might indicate an issue with the CLI version's
+        # handling of the env var, or another prompt. However, for now, we assume
+        # the CLI docs are accurate and it will use it.
+        password_source = "variable de entorno" # Explicitly set source
+    else:
+        print_info("La variable de entorno SUPABASE_DB_PASSWORD no está configurada.")
+        try:
+            # Usar input() para el mensaje y luego getpass() para la entrada real
+            # para asegurar que el mensaje se muestra incluso si getpass tiene problemas en algunos entornos.
+            print_info("Por favor, introduce la contraseña de tu base de datos Supabase. Deja en blanco para omitir.")
+            db_password_input = getpass.getpass("Contraseña de la base de datos (se ocultará la entrada): ")
+            if db_password_input:
+                link_command_list.extend(["--password", db_password_input])
+                password_source = "entrada del usuario"
+                print_info("Contraseña proporcionada por el usuario.")
+            else:
+                print_info("No se proporcionó contraseña. El comando 'link' intentará continuar sin ella (puede omitir la validación de la BD o fallar si es obligatoria).")
+        except Exception as e:
+            print_warning(f"No se pudo leer la contraseña de forma segura ({e}). El comando 'link' se ejecutará sin pasar una contraseña explícita.")
+            print_info("Puedes configurar la variable de entorno SUPABASE_DB_PASSWORD para evitar este prompt.")
+
+    # Aumentar timeout a 180s, ya que el enlace puede llevar tiempo, especialmente la primera vez.
+    # El timeout original de 180s ya era generoso, mantenerlo.
     success, stdout, stderr = run_command(
         link_command_list,
-        timeout=180,
+        timeout=180, # Mantenemos el timeout de 180s
         supabase_executable_path=supabase_cmd if supabase_cmd != "supabase" else None,
         check=False # Permitir que analicemos el error nosotros mismos
     )
 
+    link_command_str_display = list(link_command_list)
+    # Ocultar la contraseña en el mensaje de log si se proporcionó
+    try:
+        idx = link_command_str_display.index("--password")
+        if idx + 1 < len(link_command_str_display):
+            link_command_str_display[idx+1] = "*******"
+    except ValueError:
+        pass # --password no estaba en la lista
+    final_link_command_str = ' '.join(link_command_str_display)
+
+
     if success:
         print_success(f"Proyecto vinculado exitosamente con {project_ref}.")
+        # Guardar el project_ref en config.toml si el link fue exitoso y no estaba ya allí o difiere
+        try:
+            config_needs_update = False
+            if os.path.exists(CONFIG_FILE_PATH):
+                config = configparser.ConfigParser()
+                config.read(CONFIG_FILE_PATH)
+                current_project_id_in_config = None
+                if config.has_option(config.default_section, 'project_id'): # Asumiendo que está en la sección default
+                    current_project_id_in_config = config.get(config.default_section, 'project_id').strip('"\'')
+
+                if current_project_id_in_config != project_ref:
+                    config_needs_update = True
+                    if current_project_id_in_config:
+                        print_info(f"Actualizando project_id en '{CONFIG_FILE_PATH}' de '{current_project_id_in_config}' a '{project_ref}'.")
+                    else:
+                        print_info(f"Estableciendo project_id en '{CONFIG_FILE_PATH}' a '{project_ref}'.")
+                else:
+                    print_info(f"El project_id en '{CONFIG_FILE_PATH}' ya coincide con '{project_ref}'.")
+
+            else: # El archivo config.toml no existe
+                config_needs_update = True
+                print_info(f"Creando '{CONFIG_FILE_PATH}' con project_id '{project_ref}'.")
+
+            if config_needs_update:
+                # Crear el directorio supabase si no existe (aunque 'init' debería haberlo hecho)
+                os.makedirs(SUPABASE_DIR, exist_ok=True)
+                config = configparser.ConfigParser() # Empezar con un config limpio para escribir
+                # Asegurar que la sección por defecto exista si no hay otras secciones.
+                # ConfigParser escribe [DEFAULT] si no hay otras secciones, pero si el archivo
+                # es leído y no tiene secciones, puede dar error.
+                # Es más seguro añadir explícitamente project_id sin sección o en una sección conocida.
+                # Supabase CLI parece ponerlo sin una sección específica, o bajo [project_id] en algunos casos.
+                # Por simplicidad y consistencia con la lectura manual, lo ponemos sin sección.
+                # Sin embargo, configparser requiere una sección para escribir.
+                # Vamos a escribirlo en la sección DEFAULT si no hay otra cosa.
+                # O, si sabemos que `supabase init` crea una estructura específica, la seguimos.
+                # El log del usuario indica: 'project_id = "nhtllunnqhgccrqjwbwz"\n' (sin sección)
+                # Para escribir esto con configparser, es complicado. Escribámoslo manualmente.
+
+                with open(CONFIG_FILE_PATH, 'w') as f_cfg:
+                    f_cfg.write(f'project_id = "{project_ref}"\n')
+                print_success(f"Archivo '{CONFIG_FILE_PATH}' actualizado/creado con project_id = \"{project_ref}\".")
+
+        except Exception as e_cfg_write:
+            print_warning(f"No se pudo actualizar/crear '{CONFIG_FILE_PATH}' con el project_ref: {e_cfg_write}")
         return True
     else:
         # Analizar stderr para dar mejores mensajes
         stderr_lower = stderr.lower()
-        link_command_str = ' '.join(link_command_list)
 
         if "already linked to project" in stderr_lower and project_ref in stderr_lower:
             print_success(f"El proyecto ya está vinculado con {project_ref}. Continuando...")
             return True
         elif "config file differs" in stderr_lower:
-            print_warning(f"El project ID en {CONFIG_FILE_PATH} difiere del proporcionado para el comando '{link_command_str}'.")
-            print_info("Por favor, resuelve esto manualmente o considera usar el flag --force si estás seguro (ej. 'supabase link --project-ref TU_PROJECT_ID --force').")
-            # Nota: El script actual no añade --force automáticamente para link.
+            print_warning(f"El project ID en {CONFIG_FILE_PATH} difiere del proporcionado para el comando '{final_link_command_str}'.")
+            print_info("Esto puede ocurrir si el archivo local ya está vinculado a otro proyecto.")
+            print_info(f"El script intentó vincular con '{project_ref}'.")
+            print_info(f"Puedes intentar '{supabase_cmd} unlink' y luego re-ejecutar este script,")
+            print_info(f"o ejecutar '{supabase_cmd} link --project-ref {project_ref} --force' manualmente si estás seguro.")
             return False
 
-        # Condición corregida para detectar el mensaje de timeout de run_command
-        is_timeout_error = "timeout (" in stderr_lower
-        # Condición para detectar un proceso que pudo haberse colgado sin output antes de ser terminado por nuestro timeout
-        is_hung_process = not success and not stderr.strip() and not stdout.strip()
+        is_timeout_error = "timeout (" in stderr_lower and "para el comando" in stderr_lower
+        is_generic_timeout_message_from_cli = "operation timed out" in stderr_lower # Mensaje directo de la CLI
 
-        if is_timeout_error or is_hung_process:
-            print_error(f"El comando '{link_command_str}' falló, muy probablemente por timeout o porque está esperando un input interactivo (como la contraseña de la base de datos).")
+        # Si se proporcionó contraseña y aún así hay timeout, el problema es otro (red, servicio, etc.)
+        if (is_timeout_error or is_generic_timeout_message_from_cli) and password_source:
+            print_error(f"El comando '{final_link_command_str}' (con contraseña de {password_source}) falló por timeout.")
+            print_info("Recomendaciones:")
+            print_info(f"  1. Verifica tu conexión a internet y que el proyecto Supabase '{project_ref}' esté accesible y operativo.")
+            print_info(f"  2. Intenta ejecutar el comando '{final_link_command_str}' manualmente en tu terminal para ver si hay más detalles.")
+            if stderr.strip(): print_warning(f"  Detalle del error (stderr): {stderr.strip()}")
+            if stdout.strip(): print_info(f"  Salida (stdout): {stdout.strip()}")
+            return False
+        # Si NO se proporcionó contraseña (o falló getpass) Y hay timeout, es probable que sea el prompt.
+        elif (is_timeout_error or is_generic_timeout_message_from_cli) and not password_source:
+            print_error(f"El comando '{final_link_command_str}' (sin contraseña explícita) falló, muy probablemente por timeout esperando un input interactivo (como la contraseña de la base de datos).")
             print_info("\nRecomendaciones:")
-            print_info(f"  1. Intenta ejecutar el comando '{link_command_str}' manualmente en tu terminal.")
-            print_info(f"     Esto te permitirá ver si aparece algún prompt (por ejemplo, para la contraseña de la base de datos) y responderlo.")
-            print_info(f"  2. Si se te solicita una contraseña y deseas automatizar esto en futuras ejecuciones:")
-            print_info(f"     Puedes configurar la variable de entorno SUPABASE_DB_PASSWORD con la contraseña de tu base de datos antes de ejecutar este script.")
-            print_info(f"     El comando 'link' podría omitir el prompt de contraseña si esta variable está configurada.")
+            print_info(f"  1. Intenta ejecutar el comando '{final_link_command_str}' manualmente en tu terminal. Esto te permitirá ver si aparece algún prompt y responderlo.")
+            print_info(f"  2. Para automatizar, configura la variable de entorno SUPABASE_DB_PASSWORD con la contraseña de tu base de datos antes de ejecutar este script.")
+            print_info(f"     El script intentará leerla o te la solicitará de forma segura si no está configurada.")
             print_info(f"  3. Verifica tu conexión a internet y que el proyecto Supabase '{project_ref}' esté accesible.")
             if stderr.strip(): print_warning(f"  Detalle del error (stderr): {stderr.strip()}")
             if stdout.strip(): print_info(f"  Salida (stdout): {stdout.strip()}")
             return False
         else: # Otro tipo de error
-            print_error(f"Error al ejecutar '{link_command_str}'.")
+            print_error(f"Error al ejecutar '{final_link_command_str}'.")
+            if "authentication failed" in stderr_lower or "password authentication failed" in stderr_lower:
+                print_error("Falló la autenticación de la base de datos. Verifica la contraseña proporcionada.")
+                if password_source == "variable de entorno":
+                    print_info("La contraseña se tomó de SUPABASE_DB_PASSWORD. Verifica que sea correcta.")
+                elif password_source == "entrada del usuario":
+                    print_info("La contraseña fue la que introdujiste en el prompt.")
+            elif "project not found" in stderr_lower:
+                print_error(f"El proyecto con ref '{project_ref}' no fue encontrado en Supabase.")
+                print_info("Verifica que el PROJECT_REF sea correcto y que el proyecto exista.")
+
             if stdout.strip(): print_info(f"  Salida (stdout): {stdout.strip()}")
             if stderr.strip(): print_warning(f"  Salida (stderr): {stderr.strip()}")
             return False
