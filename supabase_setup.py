@@ -874,7 +874,58 @@ def main():
         return
 
     confirm_apply = input(f"\n¿Estás listo para aplicar las migraciones (incluyendo '{INIT_SQL_FILE}') a tu proyecto Supabase '{project_ref}'? (s/N): ").strip().lower()
+    confirm_apply = input(f"\n¿Estás listo para aplicar las migraciones (incluyendo '{INIT_SQL_FILE}') a tu proyecto Supabase '{project_ref}'? (s/N): ").strip().lower()
     if confirm_apply == 's':
+        # --- Preguntar por reseteo de base de datos ---
+        confirm_reset = input(f"\n⚠️ ADVERTENCIA: ¿Quieres resetear la base de datos remota para el proyecto '{project_ref}' ANTES de aplicar las migraciones? \nESTO BORRARÁ TODOS LOS DATOS EN LA BASE DE DATOS REMOTA. Esta acción es irreversible. (yes/NO): ").strip().lower()
+
+        if confirm_reset == 'yes':
+            print_info(f"Intentando resetear la base de datos remota para el proyecto {project_ref}...")
+
+            reset_command_list = [supabase_executable_to_use, "db", "reset", "--debug"]
+            # `supabase db reset` suele operar sobre el proyecto vinculado y no necesita --project-ref
+            # y puede que no siempre necesite --password si la CLI tiene una sesión activa.
+            # Sin embargo, si la contraseña se proporcionó durante el link, es bueno intentarlo.
+            if session_db_password:
+                reset_command_list.extend(["--password", session_db_password])
+                print_info("Usando contraseña proporcionada/detectada durante el 'link' para 'db reset'.")
+            else:
+                # Si no hay contraseña de sesión, intentar con la variable de entorno
+                db_password_env_reset = os.environ.get("SUPABASE_DB_PASSWORD")
+                if db_password_env_reset:
+                    reset_command_list.extend(["--password", db_password_env_reset])
+                    print_info("Usando contraseña de la variable de entorno SUPABASE_DB_PASSWORD para 'db reset'.")
+                else:
+                    print_info("No se proporcionó contraseña explícita para 'db reset'. El comando podría fallar si es requerida y no hay sesión activa.")
+
+            reset_command_display = list(reset_command_list)
+            try:
+                idx = reset_command_display.index("--password")
+                if idx + 1 < len(reset_command_display):
+                    reset_command_display[idx+1] = "*******"
+            except ValueError:
+                pass
+
+            print_info(f"Ejecutando: {' '.join(reset_command_display)}")
+
+            reset_success, _, reset_stderr = run_command(
+                reset_command_list,
+                timeout=300, # Timeout más corto para reset que para push
+                suppress_output=False,
+                supabase_executable_path=supabase_executable_to_use if supabase_executable_to_use != "supabase" else None,
+                check=False # Manejar el fallo manualmente
+            )
+
+            if reset_success:
+                print_success(f"Base de datos remota para el proyecto '{project_ref}' reseteada exitosamente.")
+            else:
+                print_error(f"Falló el reseteo de la base de datos remota para '{project_ref}'. Detalle: {reset_stderr}")
+                print_warning("Las migraciones NO se aplicarán debido al fallo en el reseteo.")
+                return # Salir de main si el reseteo falló y era deseado
+        else:
+            print_info("Reseteo de la base de datos remota omitido por el usuario.")
+        # --- Fin de la lógica de reseteo ---
+
         if apply_migrations(project_ref, supabase_executable_to_use, db_password_from_link=session_db_password):
             print_success("¡Proceso de configuración de Supabase completado!")
             print_info("Recuerda verificar tu dashboard de Supabase para confirmar que todo está como esperas.")
